@@ -33,10 +33,6 @@ project(${PROJ_CAMEL} VERSION ${PROJ_VERSION} LANGUAGES CXX)
 
 if(IPC_META_ROOT)
   message("IPC_META_ROOT is set indicating we are a subdir of a meta-project.  Dependencies should be pre-loaded.")
-  if(NOT (TARGET flow))
-    message(FATAL_ERROR "`flow` target not loaded.  Our daddy script seems to be misbehaving!")
-  endif()
-
   set(FLOW_LIKE_TOOLS "${IPC_META_ROOT_flow}/tools/cmake")
 else()
   message("IPC_META_ROOT not set; this indicates we are being distributed separately as opposed to "
