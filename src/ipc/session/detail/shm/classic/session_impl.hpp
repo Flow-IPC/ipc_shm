@@ -290,14 +290,12 @@ typename CLASS_CLSC_SESSION_IMPL::Blob
     serialization = session_shm()->lend_object(handle);
     scope_id = S_SCOPE_ID_SESSION;
   }
-  else if (app_shm()->is_handle_in_arena(handle))
+  else // (Do not use `else if (is_handle_in_arena())` to avoid maybe-uninitialized warning in some compilers.)
   {
+    assert(app_shm()->is_handle_in_arena(handle)
+           && "lend_object() called on invalid value?  Or bug -- forgot to update this method?");
     serialization = app_shm()->lend_object(handle);
     scope_id = S_SCOPE_ID_APP;
-  }
-  else
-  {
-    assert(false && "lend_object() called on invalid value?  Or bug -- forgot to update this method?");
   }
 
   /* Encode which Arena it came from, so borrow_object() can decode this on the other side.  Without this it's
