@@ -21,6 +21,7 @@
 #include "ipc/session/detail/shm/classic/session_impl.hpp"
 #include "ipc/session/detail/shm/classic/classic_fwd.hpp"
 #include "ipc/session/detail/server_session_impl.hpp"
+#include <utility>
 
 namespace ipc::session::shm::classic
 {
@@ -342,7 +343,7 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
                                            /* ^-- Careful: We only use this->get_logger() which is explicitly okay.
                                             * *this is destroyed w/r/t Server_session_impl by the
                                             * time this lambda is executed; so we do not use that. */
-                                           shm_pool_name]()
+                                           shm_pool_name = std::move(shm_pool_name)]()
     {
       // We are in thread U (in dtor chain).
       Error_code sink; // We do not care about any error.  This is our best effort; it'll WARN on (unlikely) error.

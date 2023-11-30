@@ -22,6 +22,8 @@
 # Other stuff is transitively specified by the latter, even though we do use some of that
 # stuff directly too.
 
+message(STATUS "Dependents shall need to import/link lib: ipc_session.")
+
 set(DEP_IPC_SESSION_VERSION 1.0)
 if(TARGET ipc_session)
   set(DEP_LIBS ipc_session) # In meta-project mode it's loaded by this short name.
@@ -88,8 +90,8 @@ function(generate_custom_srcs)
         ${IPC_META_ROOT_ipc_session}/src
         ${IPC_META_ROOT_ipc_shm}/src)
 
-    message("We are a subdir of a meta-project.  Manually added the following sibling paths to the capnp "
-            "import paths: [${CAPNPC_IMPORT_DIRS}].")
+    message(VERBOSE "We are a subdir of a meta-project.  Manually added the following sibling paths to the capnp "
+                      "import paths: [${CAPNPC_IMPORT_DIRS}].")
   endif()
 
   capnp_generate_cpp(capnp_generated_srcs capnp_generated_hdrs ${CAPNP_SCHEMAS})
@@ -99,8 +101,9 @@ function(generate_custom_srcs)
   set(SRCS ${SRCS} PARENT_SCOPE)
   set(HDRS ${HDRS} PARENT_SCOPE)
 
-  message("capnp schema files [${CAPNP_SCHEMAS}] shall be exported; plus generated sources [${capnp_generated_srcs}] "
-          "and headers [${capnp_generated_hdrs}] shall be compiled/linked and exported respectively.")
+  message(STATUS "Install target: Exports capnp schemas [${CAPNP_SCHEMAS}].")
+  message(STATUS "Install target: Exports capnp schema-generated headers [${capnp_generated_hdrs}].")
+  message(STATUS "capnp-generated sources: [${capnp_generated_srcs}].")
 endfunction()
 
 include("${FLOW_LIKE_TOOLS}/FlowLikeLib.cmake")

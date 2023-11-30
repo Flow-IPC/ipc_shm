@@ -36,8 +36,6 @@ function(handle_binary name_sh) # name_sh is "cli" or "srv"; as in session-clien
   # Do stuff we've resolved to do on all our targets.
   common_set_target_properties(${name})
 
-  target_compile_options(${name} PRIVATE ${WARN_FLAGS})
-
   # Link good ol' libipc_shm.
   target_link_libraries(${name} PRIVATE ${PROJ})
 
@@ -45,8 +43,9 @@ function(handle_binary name_sh) # name_sh is "cli" or "srv"; as in session-clien
   install(TARGETS ${name}
           RUNTIME DESTINATION bin)
 
-  message("Recommended: [cd ${CMAKE_INSTALL_PREFIX}/bin && "
-          "./${name}].  Run srv program first in 1 terminal, then cli in another, as same user, from that dir.")
+  message(STATUS "Recommended: [cd ${CMAKE_INSTALL_PREFIX}/bin && "
+                   "./${name}].")
+  message(STATUS "Run srv program first in 1 terminal, then cli in another, as same user, from that dir.")
 endfunction()
 
 handle_binary(srv)
