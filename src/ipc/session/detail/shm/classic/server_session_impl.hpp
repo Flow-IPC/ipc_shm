@@ -45,7 +45,7 @@ public:
    * @todo Maybe make #S_SHM_CLASSIC_POOL_SIZE_LIMIT_MI configurable.  Investigate if it has effect on perf; and just
    * generally investigate how this works in detail, at least in Linux, so we don't get into trouble.
    */
-  static constexpr size_t S_SHM_CLASSIC_POOL_SIZE_LIMIT_MI = 2048;
+  static constexpr size_t S_SHM_CLASSIC_POOL_SIZE_LIMIT_MI = 256;
 };
 
 /**
