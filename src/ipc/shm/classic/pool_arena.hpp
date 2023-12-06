@@ -55,8 +55,10 @@ namespace ipc::shm::classic
  *     havoc in your application.
  *     - Possible contingency: You may set the max pool size to a giant value.  This will *not* take it from
  *       the OS like Linux: only when a page is actually touched, such as by allocating in it, does that actual
- *       RAM get assigned to your application(s).  I (ygoldfel) have not tested this approach, but it may be
- *       sound.  Unsure of any perf aspects of it though.
+ *       RAM get assigned to your application(s).  There is unfortunately, at least in Linux, some configurable
+ *       kernel parameters as to the sum of max pool sizes active at a given time -- `ENOSPC` (No space left on device)
+ *       may be emitted when trying to open a pool beyond this.  All in all it is a viable approach but may need
+ *       a measure of finesse.
  *   - The ability to allocate in a given backing pool via any process's Pool_arena handle to that
  *     backing pool -- not to mention deallocate in process B what was allocated in process A -- requires
  *     guaranteed read-write capability in all `Pool_arena`s accessing a given pool.  That read-write capability
@@ -211,10 +213,14 @@ public:
    *        Pool size.  Note: OS, namely Linux, shall not in fact take (necessarily) this full amount from general
    *        availability but rather a small amount.  Chunks of RAM (pages) shall be later reserved as they begin to
    *        be used, namely via the allocation API.  It may be viable to set this to a quite large value to
-   *        avoid running out of pool space.
+   *        avoid running out of pool space.  However watch out for (typically configurable) kernel parameters
+   *        as to the sum of sizes of active pools.
    * @param err_code
    *        See `flow::Error_code` docs for error reporting semantics.  #Error_code generated:
    *        various.  Most likely creation failed due to permissions, or it already existed.
+   *        An `ENOSPC` (No space left on device) error means the aforementioned kernel parameter has been
+   *        hit (Linux at least); pool size rebalancing in your overall system may be required (or else one
+   *        might tweak the relevant kernel parameter(s)).
    */
   explicit Pool_arena(flow::log::Logger* logger_ptr, const Shared_name& pool_name,
                       util::Create_only mode_tag, size_t pool_sz,

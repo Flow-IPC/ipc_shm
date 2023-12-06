@@ -32,7 +32,16 @@ namespace ipc::session::shm::classic
  * This is to vanilla Session_server what shm::classic::Server_session is to vanilla #Server_session: it is
  * the session-server type that starts SHM-enabled sessions with SHM-classic provider
  * (ipc::shm::classic::Pool_arena).  Its API is identical to that of Session_server, except that it
- * emits #Server_session_obj that are shm::classic::Server_session and not vanilla #Server_session.
+ * emits #Server_session_obj that are shm::classic::Server_session and not vanilla #Server_session.  In addition:
+ *
+ * ### Max pool size configuration API (optional) ###
+ * If using this, as opposed to (at least) SHM-jemalloc provider (session::shm::arena_lend::jemalloc::Session_server),
+ * you could potentially encounter "No space left on device" (`ENOSPC` in at least Linux) in async_accept().
+ * This has nothing to do with drive space, or even physical RAM in fact.  It has to do with certain kernel parameters
+ * governing virtual SHM-mapped space.  If this becomes a problem then please look into
+ * Session_server::pool_size_limit_mi() API.  See the doc header for the accessor for discussion.
+ *
+ * In most cases it should not come up.
  *
  * @internal
  * ### Implementation ###
@@ -97,7 +106,8 @@ public:
   // Constructors/destructor.
 
   /**
-   * Constructor: identical to session::Session_server ctor.  See its doc header.
+   * Constructor: identical to session::Session_server ctor.  See its doc header.  Consider also
+   * pool_size_limit_mi() mutator (though if there are no problems in practice, then you can leave it alone).
    *
    * @param logger_ptr
    *        See above.
@@ -159,13 +169,60 @@ public:
   // Methods.
 
   /**
+   * The pool-size value, in mebibytes, which will be used to size the pool in subsequent
+   * `async_accept()`s.  One can change this via the mutator overload.
+   *
+   * A large default value is used if one does not invoke that mutator.
+   *
+   * ### How it works ###
+   * Each time async_accept() succeeds, a SHM pool sized according to this value is created for the session;
+   * and potentially another SHM pool sized similarly is created for the Client_app (if and only if a session against
+   * the same Client_app has not yet been opened by `*this`).  The *key point*: only a tiny amount of RAM
+   * is actually taken at that time for each pool; the pool size only counts against vaddr space which is
+   * essentially unlimited.  Physical RAM is reserved only upon actual allocation for objects subsequently, with
+   * kernel-page-sized quantization.  Therefore a huge value can be used here with no RAM-use penalty; on the
+   * other hand if this value is too small, and an allocation makes a pool run out of vaddr space, then
+   * a `bad_alloc` exception will be thrown, and you're pretty much kaput.  So you should use a huge value!
+   * And indeed the default is quite large.
+   *
+   * Unfortunately, at least in Linux, there is nevertheless a system-wide limit against the sum of these
+   * SHM-pool virtual sizes.  This is a kernel parameter and is usually admin-configurable; it might default to
+   * half your physical RAM for example.  Therefore unfortunately if too much virtual space is used by active
+   * SHM-pools across the system, a Linux (at least) `ENOSPC` (No space left on device) error might result
+   * (in our case be passed to async_accept() completion handler).  In that case, you can either tweak
+   * the relevant kernel parameter(s); or use pool_size_limit_mi() mutator to reduce your pool sizes -- assuming
+   * of course it'll be sufficient for your allocation needs.
+   *
+   * For most use cases none of this will be a problem.  If it becomes a problem, either use a solution above;
+   * or consider ipc::session::shm::arena_lend::jemalloc::Session_server (SHM-jemalloc) which is a multi-pool
+   * system that adjusts dynamically without your having to worry about it at all.
+   *
+   * @return See above.
+   */
+  size_t pool_size_limit_mi() const;
+
+  /**
+   * Sets the value as returned by `pool_size_limit_mi()` accessor.  See its doc header.
+   * Behavior is undefined if this is called concurrently with async_accept() itself, or while an
+   * async_accept() is outstanding.
+   *
+   * A large default value is used if one does not call this.
+   *
+   * @param limit_mi
+   *        The new value.  It must be positive.
+   */
+  void pool_size_limit_mi(size_t limit_mi);
+
+  /**
    * Contract identical to simpler session::Session_server::async_accept() overload; but internally ensures that
    * the appropriate SHM-classic arenas are available for use in the emitted #Server_session_obj.  See doc header for
    * session::Session_server::async_accept() simple overload.
    *
    * Additional (to those documented for Session_server::async_accept()) #Error_code generated and passed to
    * `on_done_func()`: See shm::classic::Pool_arena ctor doc header.  The most likely reason for failure of that
-   * code in this context is a permissions issue creating the SHM pool.
+   * code in this context is a permissions issue creating the SHM pool, or `ENOSPC` (Linux at least) a/k/a
+   * "No space left on device" if a kernel level for sum of pool sizes has been reached.  In this case consider
+   * pool_size_limit_mi() mutator and/or tweaking the kernel parameter.
    *
    * @tparam Task_err
    *         See above.
@@ -186,7 +243,9 @@ public:
    *
    * Additional (to those documented for session::Session_server::async_accept()) #Error_code generated and passed to
    * `on_done_func()`: See shm::classic::Pool_arena ctor doc header.  The most likely reason for failure of that
-   * code in this context is a permissions issue creating the SHM pool.
+   * code in this context is a permissions issue creating the SHM pool or `ENOSPC` (Linux at least) a/k/a
+   * "No space left on device" if a kernel level for sum of pool sizes has been reached.  In this case consider
+   * pool_size_limit_mi() mutator and/or tweaking the kernel parameter.
    *
    * @tparam Task_err
    *         See above.
@@ -347,6 +406,9 @@ private:
 
   // Data.
 
+  /// See pool_size_limit_mi().
+  size_t m_pool_size_limit_mi;
+
   /// Identical to Session_server::m_srv_app_ref.  Used in init_app_shm_as_needed() name calc.
   const Server_app& m_srv_app_ref;
 
@@ -395,6 +457,7 @@ CLASS_CLSC_SESSION_SRV::Session_server(flow::log::Logger* logger_ptr, const Serv
   Impl(logger_ptr, this, srv_app_ref_arg, cli_app_master_set_ref, err_code,
        [this](const Client_app& app) -> Error_code
          { return init_app_shm_as_needed(app); }), // Impl customization point: create *(app_shm()) for the `app`.
+  m_pool_size_limit_mi(2048), // This is configurable; this is the default.  @todo Maybe have constant for this magic #.
   m_srv_app_ref(Impl::m_srv_app_ref),
   m_srv_namespace
     (Server_session_dtl<Server_session_obj>(nullptr, m_srv_app_ref, transport::sync_io::Native_socket_stream())
@@ -451,6 +514,19 @@ TEMPLATE_CLSC_SESSION_SRV
 CLASS_CLSC_SESSION_SRV::~Session_server() = default; // Declared just to document it.  Forward to base.
 
 TEMPLATE_CLSC_SESSION_SRV
+void CLASS_CLSC_SESSION_SRV::pool_size_limit_mi(size_t limit_mi)
+{
+  assert(limit_mi > 0);
+  m_pool_size_limit_mi = limit_mi;
+}
+
+TEMPLATE_CLSC_SESSION_SRV
+size_t CLASS_CLSC_SESSION_SRV::pool_size_limit_mi() const
+{
+  return m_pool_size_limit_mi;
+}
+
+TEMPLATE_CLSC_SESSION_SRV
 Error_code CLASS_CLSC_SESSION_SRV::init_app_shm_as_needed(const Client_app& app)
 {
   using boost::movelib::make_unique;
@@ -483,8 +559,7 @@ Error_code CLASS_CLSC_SESSION_SRV::init_app_shm_as_needed(const Client_app& app)
 
   Error_code err_code;
   app_shm = make_unique<Arena>(get_logger(), shm_pool_name, util::CREATE_ONLY,
-                               size_t(1024 * 1024) * Server_session_impl_concrete
-                                                       ::S_SHM_CLASSIC_POOL_SIZE_LIMIT_MI,
+                               size_t(1024 * 1024) * pool_size_limit_mi(),
                                util::shared_resource_permissions(m_srv_app_ref.m_permissions_level_for_client_apps),
                                &err_code);
   /* Either err_code is truthy/app_shm is null; or vice versa.  In the former case just leave null in the map; meh.

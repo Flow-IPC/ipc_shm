@@ -28,6 +28,8 @@ namespace ipc::session::shm::classic
 
 // Types.
 
+/// XXX
+#if 0
 /// shm::classic::Server_session_impl helper that contains non-parameterized `public` items such as constants.
 class Server_session_impl_concrete
 {
@@ -47,6 +49,7 @@ public:
    */
   static constexpr size_t S_SHM_CLASSIC_POOL_SIZE_LIMIT_MI = 2048;
 };
+#endif
 
 /**
  * Core internally-used implementation of shm::classic::Server_session: it is to the latter what its `public`
@@ -278,8 +281,7 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
                          / Shared_name::S_1ST_OR_ONLY;
 
     auto session_shm = make_unique<typename Base::Arena>(get_logger(), shm_pool_name, util::CREATE_ONLY,
-                                                         size_t(1024 * 1024) * Server_session_impl_concrete
-                                                                                 ::S_SHM_CLASSIC_POOL_SIZE_LIMIT_MI,
+                                                         size_t(1024 * 1024) * srv->pool_size_limit_mi(),
                                                          util::shared_resource_permissions
                                                            (srv_app.m_permissions_level_for_client_apps),
                                                          &err_code);
