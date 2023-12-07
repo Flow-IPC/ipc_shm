@@ -30,8 +30,6 @@ namespace ipc::session::shm::classic
 template<typename Session_impl_t>
 class Session_impl;
 
-class Server_session_impl_concrete;
-
 template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 class Server_session_impl;
 
