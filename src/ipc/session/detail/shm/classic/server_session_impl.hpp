@@ -28,26 +28,6 @@ namespace ipc::session::shm::classic
 
 // Types.
 
-/// shm::classic::Server_session_impl helper that contains non-parameterized `public` items such as constants.
-class Server_session_impl_concrete
-{
-public:
-  // Constants.
-
-  /**
-   * Max size, in mebibytes, of each per-app and per-session pool.
-   *
-   * Note: this isn't how much RAM is taken away from all other uses;
-   * only a little bit is; this is only how much vaddr space (which is nearly unlimited) is reserved.
-   * Actual RAM is reserved on a ~page basis, once a given page has something written to it (such as by being
-   * allocated via `Pool_arena::allocate*()`, directly or otherwise).
-   *
-   * @todo Maybe make #S_SHM_CLASSIC_POOL_SIZE_LIMIT_MI configurable.  Investigate if it has effect on perf; and just
-   * generally investigate how this works in detail, at least in Linux, so we don't get into trouble.
-   */
-  static constexpr size_t S_SHM_CLASSIC_POOL_SIZE_LIMIT_MI = 2048;
-};
-
 /**
  * Core internally-used implementation of shm::classic::Server_session: it is to the latter what its `public`
  * super-class Server_session_impl is to #Server_session.
@@ -278,8 +258,7 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
                          / Shared_name::S_1ST_OR_ONLY;
 
     auto session_shm = make_unique<typename Base::Arena>(get_logger(), shm_pool_name, util::CREATE_ONLY,
-                                                         size_t(1024 * 1024) * Server_session_impl_concrete
-                                                                                 ::S_SHM_CLASSIC_POOL_SIZE_LIMIT_MI,
+                                                         size_t(1024 * 1024) * srv->pool_size_limit_mi(),
                                                          util::shared_resource_permissions
                                                            (srv_app.m_permissions_level_for_client_apps),
                                                          &err_code);
