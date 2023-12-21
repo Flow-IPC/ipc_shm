@@ -270,7 +270,7 @@ public:
    *        (in this implementation) writing and is thus also disallowed.    Lastly, and quite significantly,
    *        borrow_object() can be called, but undefined behavior shall result when the resulting `shared_ptr`
    *        (#Handle) group reaches ref-count 0, as internally that requires a decrement of a counter (which is
-   *        a write).  Therefore borrow() cannot be used either.  Therefore it is up to you, in that
+   *        a write).  Therefore borrow_object() cannot be used either.  Therefore it is up to you, in that
    *        case, to (1) never call deallocate() directly or otherwise (i.e., through an allocator);
    *        and (2) to design your algorithms in such a way as to never require lending to this Pool_arena.
    *        In practice this would be quite a low-level, stunted use of `Pool_arena` across 2+ processes;
