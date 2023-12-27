@@ -15,5 +15,4 @@
 # See the License for the specific language governing
 # permissions and limitations under the License.
 
-#XXX
-#add_subdirectory(link_test)
+add_subdirectory(link_test)
