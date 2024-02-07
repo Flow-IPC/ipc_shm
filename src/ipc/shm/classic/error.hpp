@@ -45,7 +45,7 @@ constexpr int S_CODE_LOWEST_INT_VALUE = 1;
 enum class Code
 {
   /**
-   * Low-level Boost.ipc.shm: boost.interprocess emitted miscellaneous library exception sans a system code;
+   * Low-level boost.ipc.shm: boost.interprocess emitted miscellaneous library exception sans a system code;
    * a WARNING message at throw-time should contain all possible details.
    */
   S_SHM_BIPC_MISC_LIBRARY_ERROR,
