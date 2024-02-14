@@ -22,6 +22,7 @@
 #include "ipc/session/shm/classic/server_session.hpp"
 #include "ipc/session/detail/session_server_impl.hpp"
 #include "ipc/transport/struc/schema/common.capnp.h"
+#include <boost/move/make_unique.hpp>
 
 namespace ipc::session::shm::classic
 {

@@ -20,6 +20,7 @@
 
 #include "ipc/transport/struc/heap_serializer.hpp"
 #include "ipc/transport/struc/shm/capnp_msg_builder.hpp"
+#include <boost/move/make_unique.hpp>
 
 namespace ipc::transport::struc::shm
 {
