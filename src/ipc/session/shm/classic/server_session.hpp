@@ -23,6 +23,7 @@
 #include "ipc/session/detail/shm/classic/server_session_impl.hpp"
 #include "ipc/session/shm/classic/session.hpp"
 #include "ipc/session/server_session.hpp"
+#include <boost/move/make_unique.hpp>
 
 namespace ipc::session::shm::classic
 {

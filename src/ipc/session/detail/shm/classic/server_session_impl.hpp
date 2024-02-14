@@ -21,6 +21,7 @@
 #include "ipc/session/detail/shm/classic/session_impl.hpp"
 #include "ipc/session/detail/shm/classic/classic_fwd.hpp"
 #include "ipc/session/detail/server_session_impl.hpp"
+#include <boost/move/make_unique.hpp>
 #include <utility>
 
 namespace ipc::session::shm::classic

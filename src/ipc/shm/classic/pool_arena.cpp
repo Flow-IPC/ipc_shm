@@ -21,6 +21,7 @@
 #include "ipc/shm/classic/error.hpp"
 #include "ipc/util/detail/util.hpp"
 #include "ipc/util/detail/util_fwd.hpp"
+#include <boost/move/make_unique.hpp>
 
 namespace ipc::shm::classic
 {
