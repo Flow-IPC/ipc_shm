@@ -67,7 +67,7 @@ The basic prerequisites for *building* the above:
 
 The basic prerequisites for *using* the above:
 
-  - Linux, C++ compiler, Boost, above-listed dependency lib(s), capnp (but CMake is not required); plus:
+  - Linux, C++ compiler, Boost, {fmt}, above-listed dependency lib(s), capnp (but CMake is not required); plus:
   - your source code `#include`ing any exported `ipc/` headers must be itself built in C++ 17 mode;
   - any executable using the `ipc_*` libraries must be linked with certain Boost and ubiquitous
     system libraries.
