@@ -81,7 +81,7 @@ To build `ipc_shm`:
      [boost.org](https://boost.org).  If you do have one, try using that one (our build will complain if insufficient).
      (From this point on, that's the recommended tactic to use when deciding on the version number for any given
      prerequisite.  E.g., same deal with CMake in step 2.)
-  2. Ensure a {fmt} install is available (available at [{fmt} web site](https://fmt.dev/]) if needed).
+  2. Ensure a {fmt} install is available (available at [{fmt} web site](https://fmt.dev/) if needed).
   3. Ensure a CMake install is available (available at [CMake web site](https://cmake.org/download/) if needed).
   4. Ensure a capnp install is available (available at [Cap'n Proto web site](https://capnproto.org/) if needed).
   5. Use CMake `cmake` (command-line tool) or `ccmake` (interactive text-UI tool) to configure and generate
