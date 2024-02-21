@@ -133,7 +133,7 @@ namespace ipc::session::shm::classic
  *     so in fact *right* before sending log-in response), ensures the 2 SHM arenas (per-session and per-app) required
  *     to be shared have been created.   Then it sends the log-in response like usual.
  *   - The client, like usual, awaits log-in response; and once that arrives it completes the normal vanilla
- *     entry to PEER state.  However the additional step it needs is to open the 2 SHM areans guaranteed to
+ *     entry to PEER state.  However the additional step it needs is to open the 2 SHM arenas guaranteed to
  *     exist, since log-in succeeded.  Once it has done that, we're done.
  *
  * Now to discuss the specifics of each SHM scope.  The simpler one is per-session (session_shm()).
