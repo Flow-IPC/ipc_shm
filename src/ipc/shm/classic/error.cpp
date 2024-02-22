@@ -100,7 +100,7 @@ std::string Category::message(int val) const // Virtual.
   switch (static_cast<Code>(val))
   {
   case Code::S_SHM_BIPC_MISC_LIBRARY_ERROR:
-    return "Low-level Boost.ipc.shm: boost.interprocess emitted miscellaneous library exception sans a system code; "
+    return "Low-level boost.ipc.shm: boost.interprocess emitted miscellaneous library exception sans a system code; "
            "a WARNING message at throw-time should contain all possible details.";
 
   case Code::S_END_SENTINEL:
