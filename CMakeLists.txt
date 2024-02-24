@@ -34,8 +34,6 @@ set(OS_SUPPORT_MSG "Only Linux is supported for now.  For ipc_shm: It might be e
 # and testing.
 # (That's after ensuring ipc_transport_structured is supported in the OS in question first.)
 
-project(${PROJ_CAMEL} VERSION ${PROJ_VERSION} LANGUAGES CXX)
-
 if(IPC_META_ROOT)
   message(VERBOSE
             "IPC_META_ROOT is set indicating we are a subdir of a meta-project.  Dependencies should be pre-loaded.")
@@ -52,6 +50,7 @@ else()
   set(FLOW_LIKE_TOOLS "${Flow_DIR}/../../../share/flow/cmake")
 endif()
 
+project(${PROJ_CAMEL} VERSION ${PROJ_VERSION} LANGUAGES CXX)
 include("${FLOW_LIKE_TOOLS}/FlowLikeCodeGenerate.cmake")
 
 # Tip: Most likely you are next interested in ./src/CMakeLists.txt and then perhaps ./test/{basic|suite}/CMakeLists.txt.
