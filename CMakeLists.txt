@@ -50,6 +50,7 @@ else()
   set(FLOW_LIKE_TOOLS "${Flow_DIR}/../../../share/flow/cmake")
 endif()
 
+include("${FLOW_LIKE_TOOLS}/FlowLikeProject.cmake")
 include("${FLOW_LIKE_TOOLS}/FlowLikeCodeGenerate.cmake")
 
 # Tip: Most likely you are next interested in ./src/CMakeLists.txt and then perhaps ./test/{basic|suite}/CMakeLists.txt.
