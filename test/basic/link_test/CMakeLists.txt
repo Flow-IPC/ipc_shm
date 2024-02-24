@@ -20,7 +20,7 @@ find_package(CapnProto CONFIG REQUIRED)
 
 if(TARGET ipc_transport_structured)
   # Please see explanation in ipc_session's src/CMakeLists.txt for why we do the following.
-  set(CAPNPC_IMPORT_DIRS ${IPC_META_ROOT_ipc_transport_structured}/src)
+  set(CAPNPC_IMPORT_DIRS ${FLOW_LIKE_META_ROOT_ipc_transport_structured}/src)
 endif()
 
 capnp_generate_cpp(capnp_generated_srcs capnp_generated_hdrs_ignored "schema.capnp")

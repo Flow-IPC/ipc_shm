@@ -86,9 +86,9 @@ function(generate_custom_srcs)
   if(TARGET ipc_transport_structured)
     # Please see explanation in ipc_session's src/CMakeLists.txt for why we do the following.
     set(CAPNPC_IMPORT_DIRS
-        ${IPC_META_ROOT_ipc_transport_structured}/src
-        ${IPC_META_ROOT_ipc_session}/src
-        ${IPC_META_ROOT_ipc_shm}/src)
+        ${FLOW_LIKE_META_ROOT_ipc_transport_structured}/src
+        ${FLOW_LIKE_META_ROOT_ipc_session}/src
+        ${FLOW_LIKE_META_ROOT_ipc_shm}/src)
 
     message(VERBOSE "We are a subdir of a meta-project.  Manually added the following sibling paths to the capnp "
                       "import paths: [${CAPNPC_IMPORT_DIRS}].")
