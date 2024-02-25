@@ -24,8 +24,6 @@ message(CHECK_START "(Project [${PROJ}] root CMake script executing.)")
 list(APPEND CMAKE_MESSAGE_INDENT "- ")
 
 set(PROJ_CAMEL "IpcShm")
-# TODO: Get it from nearest `VERSION` file perhaps.
-set(PROJ_VERSION "1.0.0")
 set(PROJ_HUMAN "Flow-IPC (SHM)")
 
 set(OS_SUPPORT_MSG "Only Linux is supported for now.  For ipc_shm: It might be entirely portably "
@@ -50,7 +48,8 @@ else()
   set(FLOW_LIKE_TOOLS "${Flow_DIR}/../../../share/flow/cmake")
 endif()
 
-include("${FLOW_LIKE_TOOLS}/FlowLikeProject.cmake")
+include("${FLOW_LIKE_META_ROOT_flow}/tools/cmake/FlowLikeProject.cmake") # Determine $PROJ_VERSION, at least.
+project(${PROJ_CAMEL} VERSION ${PROJ_VERSION} DESCRIPTION ${PROJ_HUMAN} LANGUAGES CXX)
 include("${FLOW_LIKE_TOOLS}/FlowLikeCodeGenerate.cmake")
 
 # Tip: Most likely you are next interested in ./src/CMakeLists.txt and then perhaps ./test/{basic|suite}/CMakeLists.txt.
