@@ -25,7 +25,7 @@
 /* This little thing is *not* a unit-test; it is built to ensure the proper stuff links through our
  * build process.  We try to use a compiled thing or two; and a template (header-only) thing or two;
  * not so much for correctness testing but to see it build successfully and run without barfing. */
-int main(int, char const * const * argv)
+int main(int argc, char const * const * argv)
 {
   using flow::log::Simple_ostream_logger;
   using flow::log::Async_file_logger;
@@ -53,12 +53,13 @@ int main(int, char const * const * argv)
   FLOW_LOG_SET_CONTEXT(&std_logger, Flow_log_component::S_UNCAT);
 
   // This is separate: the IPC/Flow logging will go into this file.
-  FLOW_LOG_INFO("Opening log file [" << LOG_FILE << "] for IPC/Flow logs only.");
+  string log_file((argc >= 2) ? string(argv[1]) : LOG_FILE);
+  FLOW_LOG_INFO("Opening log file [" << log_file << "] for IPC/Flow logs only.");
   Config log_config = std_log_config;
-  log_config.configure_default_verbosity(Sev::S_INFO, true);
+  log_config.configure_default_verbosity(Sev::S_DATA, true); // High-verbosity.  Use S_INFO in production.
   /* First arg: could use &std_logger to log-about-logging to console; but it's a bit heavy for such a console-dependent
    * little program.  Just just send it to /dev/null metaphorically speaking. */
-  Async_file_logger log_logger(nullptr, &log_config, LOG_FILE, false /* No rotation; we're no serious business. */);
+  Async_file_logger log_logger(nullptr, &log_config, log_file, false /* No rotation; we're no serious business. */);
 
   try
   {
