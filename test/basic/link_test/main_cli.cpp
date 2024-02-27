@@ -65,7 +65,7 @@ int main(int argc, char const * const * argv)
   {
     ensure_run_env(argv[0], false);
 
-    // Please see main_cli.cpp.  We're just the other side of that.  Keeping comments light.
+    // Please see main_srv.cpp.  We're just the other side of that.  Keeping comments light.
 
     /* @todo This uses promises/futures to avoid having to make a thread/event loop; this avoidance is allowed though
      * informally discouraged by Flow-IPC docs; and really making a Single_threaded_event_loop is easy and
