@@ -142,7 +142,7 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::sync_connect(const typename Base::Base::Base::
   Function<bool (Task_asio_err&&)> async_connect_impl_func = [&](Task_asio_err&& on_done_func) -> bool
   {
     return async_connect(mdt, init_channels_by_cli_req_pre_sized, mdt_from_srv_or_null, init_channels_by_srv_req,
-                         std::move(on_done_func))
+                         std::move(on_done_func));
   };
   return Base::Base::sync_connect_impl(err_code, &async_connect_impl_func);
 }
