@@ -112,7 +112,7 @@ namespace ipc::session::shm::classic
  * As with the vanilla session setup, remember that while in PEER state the APIs are identical/symmetrical,
  * the roles of the server and client vary quite sharply internally -- especially before PEER state.
  * The general outline is: Session_server listens for socket connections; a given
- * `Client_session::async_connect()` connects; at this stage Session_server constructs a not-yet-user-emitted
+ * `Client_session_impl::async_connect()` connects; at this stage Session_server constructs a not-yet-user-emitted
  * #Server_session and invokes its `async_accept_log_in()`.  Now the #Client_session and #Server_session
  * have established a channel (internal-use session master channel) and undergo the log-in exchange.
  * #Client_session sends log-in request.  #Server_session verifies that, then replies with log-in response
@@ -172,9 +172,9 @@ namespace ipc::session::shm::classic
  *       on-demand.
  *   - Client: Open handle for session_shm() and app_shm() (open-only mode for each), just after fully completing
  *     the vanilla entry to PEER state (past log-in response receipt).
- *     - shm::classic::Client_session just wraps `async_connect()` by tacking on the pool-openings (which are
- *       synchronous) onto its user-supplied on-done handler.  Mechanically: Details left to
- *       shm::classic::Client_session docs.
+ *     - shm::classic::Client_session just wraps `session::Client_session_impl::async_connect()` by tacking on
+ *       the pool-openings (which are synchronous) onto its user-supplied on-done handler.  Mechanically: Details left
+ *       to shm::classic::Client_session docs.
  *
  * In `*this`, mechanically: the true implementation of the needed setup and accessors (explained above) is
  * split between shm::classic::Session_mv (common with `Client_session_impl`) and

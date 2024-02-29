@@ -34,7 +34,7 @@ namespace ipc::session::shm::classic
  * SHM-classic is such that the two sides are exactly the same, once the two shm::classic::Pool_arena handles
  * have been set up. So that stuff that is all the same is here in this internally-used super-class of the 2
  * `*_impl`. The latter add the initial assignment of the two arena handles and, relatedly, the
- * client/server-specific APIs (e.g., Client_session_impl::async_connect()).
+ * client/server-specific APIs (e.g., Client_session_impl::sync_connect()).
  *
  * @tparam Session_impl_t
  *         Our base that our sub-class wants to build on-top-of.  E.g., `Server_session_impl<...>`.
