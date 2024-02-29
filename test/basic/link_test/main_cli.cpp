@@ -65,7 +65,7 @@ int main(int argc, char const * const * argv)
   {
     ensure_run_env(argv[0], false);
 
-    // Please see main_cli.cpp.  We're just the other side of that.  Keeping comments light.
+    // Please see main_srv.cpp.  We're just the other side of that.  Keeping comments light.
 
     /* @todo This uses promises/futures to avoid having to make a thread/event loop; this avoidance is allowed though
      * informally discouraged by Flow-IPC docs; and really making a Single_threaded_event_loop is easy and
@@ -81,32 +81,18 @@ int main(int argc, char const * const * argv)
                   "it'll either succeed or fail very soon; on success at that point we will receive a message and "
                   "exit.");
 
-    bool ok = false;
-    promise<void> connected_promise;
     Session::Channels chans;
-    session.async_connect(session.mdt_builder(), nullptr, nullptr, &chans,
-                          [&](const Error_code& err_code)
+    Error_code err_code;
+    session.sync_connect(session.mdt_builder(), nullptr, nullptr, &chans, &err_code);
+    if (err_code)
     {
-      if (err_code)
-      {
-        FLOW_LOG_WARNING("Connect failed (perhaps you did not execute session-server executable in parallel, or "
-                         "you executed one or both of us oddly?).  "
-                         "Error: [" << err_code << "] [" << err_code.message() << "].");
-      }
-      else
-      {
-        FLOW_LOG_INFO("Session/channels opened.  Awaiting one message; then exiting.");
-        ok = true;
-      }
-      connected_promise.set_value();
-    });
-
-    connected_promise.get_future().wait();
-    if (!ok)
-    {
+      FLOW_LOG_WARNING("Connect failed (perhaps you did not execute session-server executable in parallel, or "
+                       "you executed one or both of us oddly?).  "
+                       "Error: [" << err_code << "] [" << err_code.message() << "].");
       return BAD_EXIT;
     }
     // else
+    FLOW_LOG_INFO("Session/channels opened.  Awaiting one message; then exiting.");
 
     promise<void> done_promise;
 

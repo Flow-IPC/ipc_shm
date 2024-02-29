@@ -72,7 +72,7 @@ class Session_server;
  * guaranteed to exist by the time the vanilla #Client_session enters PEER state (just past log-in response receipt).
  *
  * So all we have to do is provide a modified `async_connect()` which:
- *   - executes vanilla Client_session_impl::async_connect(); once that triggers the on-done handler:
+ *   - executes vanilla session::Client_session_impl::async_connect(); once that triggers the on-done handler:
  *   - open the 2 SHM pools (a synchronous op);
  *   - invoke the user's original on-done handler.
  *

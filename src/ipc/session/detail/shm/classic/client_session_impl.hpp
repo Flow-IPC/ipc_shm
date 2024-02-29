@@ -38,7 +38,7 @@ namespace ipc::session::shm::classic
  * The use of app_shm() and session_shm(), and various public APIs around them, is totally symmetrical with
  * Server_session_impl; so that all is in super-class Session_impl.  We do what's asymmetrical:
  * assigning session_shm() and app_shm() values; and provide the client-specific APIs (notably
- * async_connect()).
+ * sync_connect() which is written again in terms of -- our own -- async_connect()).
  *
  * @tparam S_MQ_TYPE_OR_NONE
  *         See shm::classic::Client_session counterpart.
@@ -68,21 +68,16 @@ public:
   // Methods.
 
   /**
-   * See Client_session_mv counterpart.  While the formal contract here is unchanged from vanilla
-   * Client_session_impl, internally: this one, before `on_done_func()` can be invoked successfully,
-   * also opens the SHM arenas which are accessible in PEER state via session_shm() and app_shm(),
-   * since the opposing session peer had to have created them before reporting log-in success
-   * (and also has these available via identical accessors).
+   * See Client_session_mv counterpart.
    *
-   * @param on_done_func
+   * @param err_code
    *        See Client_session_mv counterpart.
    * @return See Client_session_mv counterpart.
    */
-  template<typename Task_err>
-  bool async_connect(Task_err&& on_done_func);
+  bool sync_connect(Error_code* err_code);
 
   /**
-   * See Client_session_mv counterpart.  See notes in similar place on simple async_connect() overload.
+   * See Client_session_mv counterpart.
    *
    * @param mdt
    *        See Client_session_mv counterpart.
@@ -92,9 +87,37 @@ public:
    *        See Client_session_mv counterpart.
    * @param init_channels_by_srv_req
    *        See Client_session_mv counterpart.
-   * @param on_done_func
+   * @param err_code
    *        See Client_session_mv counterpart.
    * @return See Client_session_mv counterpart.
+   */
+  bool sync_connect(const typename Base::Base::Base::Mdt_builder_ptr& mdt,
+                    typename Base::Base::Base::Channels* init_channels_by_cli_req_pre_sized,
+                    typename Base::Base::Base::Mdt_reader_ptr* mdt_from_srv_or_null,
+                    typename Base::Base::Base::Channels* init_channels_by_srv_req,
+                    Error_code* err_code);
+
+  // The LOG_*() macros don't see Log_context::get_log*() from base otherwise....
+  using flow::log::Log_context::get_logger;
+  using flow::log::Log_context::get_log_component;
+
+private:
+  // Methods.
+
+  /**
+   * See session::Client_session_impl counterpart.
+   *
+   * @param mdt
+   *        See session::Client_session_impl counterpart.
+   * @param init_channels_by_cli_req_pre_sized
+   *        See session::Client_session_impl counterpart.
+   * @param mdt_from_srv_or_null
+   *        See session::Client_session_impl counterpart.
+   * @param init_channels_by_srv_req
+   *        See session::Client_session_impl counterpart.
+   * @param on_done_func
+   *        See session::Client_session_impl counterpart.
+   * @return See session::Client_session_impl counterpart.
    */
   template<typename Task_err>
   bool async_connect(const typename Base::Base::Base::Mdt_builder_ptr& mdt,
@@ -103,11 +126,6 @@ public:
                      typename Base::Base::Base::Channels* init_channels_by_srv_req,
                      Task_err&& on_done_func);
 
-  // The LOG_*() macros don't see Log_context::get_log*() from base otherwise....
-  using flow::log::Log_context::get_logger;
-  using flow::log::Log_context::get_log_component;
-
-private:
   // Data.
 
   /**
@@ -129,10 +147,26 @@ private:
   Client_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>
 
 TEMPLATE_CLSC_CLI_SESSION_IMPL
-template<typename Task_err>
-bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect(Task_err&& on_done_func)
+bool CLASS_CLSC_CLI_SESSION_IMPL::sync_connect(Error_code* err_code)
 {
-  return async_connect(Base::Base::mdt_builder(), nullptr, nullptr, nullptr, std::move(on_done_func));
+  return sync_connect(Base::Base::mdt_builder(), nullptr, nullptr, nullptr, err_code);
+}
+
+TEMPLATE_CLSC_CLI_SESSION_IMPL
+bool CLASS_CLSC_CLI_SESSION_IMPL::sync_connect(const typename Base::Base::Base::Mdt_builder_ptr& mdt,
+                                               typename Base::Base::Base::Channels* init_channels_by_cli_req_pre_sized,
+                                               typename Base::Base::Base::Mdt_reader_ptr* mdt_from_srv_or_null,
+                                               typename Base::Base::Base::Channels* init_channels_by_srv_req,
+                                               Error_code* err_code)
+{
+  using flow::async::Task_asio_err;
+
+  Function<bool (Task_asio_err&&)> async_connect_impl_func = [&](Task_asio_err&& on_done_func) -> bool
+  {
+    return async_connect(mdt, init_channels_by_cli_req_pre_sized, mdt_from_srv_or_null, init_channels_by_srv_req,
+                         std::move(on_done_func));
+  };
+  return Base::Base::sync_connect_impl(err_code, &async_connect_impl_func);
 }
 
 TEMPLATE_CLSC_CLI_SESSION_IMPL
