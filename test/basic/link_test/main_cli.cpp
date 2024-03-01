@@ -82,16 +82,7 @@ int main(int argc, char const * const * argv)
                   "exit.");
 
     Session::Channels chans;
-    Error_code err_code;
-    session.sync_connect(session.mdt_builder(), nullptr, nullptr, &chans, &err_code);
-    if (err_code)
-    {
-      FLOW_LOG_WARNING("Connect failed (perhaps you did not execute session-server executable in parallel, or "
-                       "you executed one or both of us oddly?).  "
-                       "Error: [" << err_code << "] [" << err_code.message() << "].");
-      return BAD_EXIT;
-    }
-    // else
+    session.sync_connect(session.mdt_builder(), nullptr, nullptr, &chans); // Let it throw on error.
     FLOW_LOG_INFO("Session/channels opened.  Awaiting one message; then exiting.");
 
     promise<void> done_promise;
@@ -114,6 +105,8 @@ int main(int argc, char const * const * argv)
   catch (const exception& exc)
   {
     FLOW_LOG_WARNING("Caught exception: [" << exc.what() << "].");
+    FLOW_LOG_WARNING("(Perhaps you did not execute session-server executable in parallel, or "
+                     "you executed one or both of us oddly?)");
     return BAD_EXIT;
   }
 
