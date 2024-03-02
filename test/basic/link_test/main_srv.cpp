@@ -94,8 +94,8 @@ int main(int argc, char const * const * argv)
     bool ok = false;
     Session_server::Channels chans;
     srv.async_accept(&session, &chans, nullptr, nullptr,
-                     [](auto&&, auto&&, auto&&) -> size_t { return 1; }, // 1 init-channel to open.
-                     [](auto&&, auto&&, auto&&, auto&&) {},
+                     [](auto&&...) -> size_t { return 1; }, // 1 init-channel to open.
+                     [](auto&&...) {},
                      [&](const Error_code& err_code)
     {
       if (err_code)

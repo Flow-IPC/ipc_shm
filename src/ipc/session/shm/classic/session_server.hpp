@@ -665,8 +665,8 @@ void CLASS_CLSC_SESSION_SRV::async_accept(Server_session_obj* target_session, Ta
 {
   // As advertised this overload always means:
 
-  auto ignored_func = [](auto&&, auto&&, auto&&) -> size_t { return 0; };
-  auto no_op_func = [](auto&&, auto&&, auto&&, auto&&) {};
+  auto ignored_func = [](auto&&...) -> size_t { return 0; };
+  auto no_op_func = [](auto&&...) {};
 
   async_accept(target_session, nullptr, nullptr, nullptr, std::move(ignored_func), std::move(no_op_func),
                std::move(on_done_func));
