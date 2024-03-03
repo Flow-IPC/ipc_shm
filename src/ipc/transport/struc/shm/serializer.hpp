@@ -663,6 +663,20 @@ typename Struct::Reader CLASS_SHM_READER::deserialization(Error_code* err_code)
   using ::capnp::word;
   using Capnp_word_array_array_ptr = kj::ArrayPtr<const Capnp_word_array_ptr>;
   using Capnp_struct_reader = typename Struct::Reader;
+  using Capnp_heap_engine_opts = ::capnp::ReaderOptions;
+
+  /* When constructing a MessageReader, it takes this ReaderOptions struct which defaults to certain values.
+   * In typical capnp use the user would do this themselves; but in our case we do it for them.
+   * @todo This should be part of our public API throughout (where relevant).  Surely a ticket is filed.  Until then:
+   * The defaults seem fine, except:
+   * The particular traversalLimitInWords option can cause trouble with large structures.  (See capnp source message.h
+   * for its official docs.)  It is a security feature for stuff transmitted over the wire; but as of *this* writing
+   * we do local IPC and explicitly assume trust.  So until this is made configurable (and it really should be)
+   * it's an OK work-around to just shove a giant value here.  Otherwise the mere act of reading a structure with
+   * many sub-structs (in absolute terms, not in terms of depth) can (and has, such as in our test suite's perf_demo)
+   * throw a capnp exception. */
+  constexpr Capnp_heap_engine_opts RDR_OPTIONS = { std::numeric_limits<uint64_t>::max() / sizeof(word),
+                                                   Capnp_heap_engine_opts{}.nestingLimit };
 
   // Helper to emit error via usual semantics.  We return a ref so can't use FLOW_ERROR_EXEC_AND_THROW_ON_ERROR().
   const auto emit_error = [&](const Error_code& our_err_code) -> Capnp_struct_reader
@@ -803,7 +817,7 @@ typename Struct::Reader CLASS_SHM_READER::deserialization(Error_code* err_code)
    * really m_capnp_segments.  To be clear: not only must the blobs stay alive, but so must the array referring
    * to them. */
   const Capnp_word_array_array_ptr capnp_segs_ptr(&(capnp_segs.front()), capnp_segs.size());
-  m_btm_engine = make_unique<Capnp_heap_engine>(capnp_segs_ptr);
+  m_btm_engine = make_unique<Capnp_heap_engine>(capnp_segs_ptr, RDR_OPTIONS);
 
   assert(((!err_code) || (!*err_code)) && "*err_code should have been cleared above (unless null).");
 
