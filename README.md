@@ -56,7 +56,7 @@ these comments using Doxygen, combined with its siblings' comments... and so on.
 
 - As a tarball/zip: The [project web site](https://flow-ipc.github.io) links to individual releases with notes, docs,
   download links.  We are included in a subdirectory off the Flow-IPC root.
-- For Git access:
+- Via Git:
   - `git clone --recurse-submodules git@github.com:Flow-IPC/ipc.git`; or
   - `git clone git@github.com:Flow-IPC/ipc_shm.git`
 
