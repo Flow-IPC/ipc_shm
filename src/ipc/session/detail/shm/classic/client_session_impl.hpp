@@ -279,7 +279,7 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
     } // if (!err_code)
 
     on_done_func(err_code); // err_code could be truthy.
-  }); // auto real_pre_rsp_setup_func =
+  }); // return Base::Base::async_connect()
 } // Client_session_impl::async_connect()
 
 TEMPLATE_CLSC_CLI_SESSION_IMPL
