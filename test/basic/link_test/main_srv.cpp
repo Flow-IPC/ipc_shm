@@ -29,37 +29,20 @@ int main(int argc, char const * const * argv)
 {
   using flow::log::Simple_ostream_logger;
   using flow::log::Async_file_logger;
-  using flow::log::Config;
-  using flow::log::Sev;
   using flow::Error_code;
   using flow::Flow_log_component;
-  using flow::util::String_view;
+  using flow::error::Runtime_error;
   using boost::promise;
   using std::exception;
-
-  constexpr String_view LOG_FILE = "ipc_shm_link_test_srv.log";
-  constexpr int BAD_EXIT = 1;
+  using std::optional;
 
   /* Set up logging within this function.  We could easily just use `cout` and `cerr` instead, but this
    * Flow stuff will give us time stamps and such for free, so why not?  Normally, one derives from
    * Log_context to do this very trivially, but we just have the one function, main(), so far so: */
-  Config std_log_config;
-  std_log_config.init_component_to_union_idx_mapping<Flow_log_component>
-    (1000, Config::standard_component_payload_enum_sparse_length<Flow_log_component>());
-  std_log_config.init_component_to_union_idx_mapping<ipc::Log_component>
-    (2000, Config::standard_component_payload_enum_sparse_length<ipc::Log_component>());
-  std_log_config.init_component_names<Flow_log_component>(flow::S_FLOW_LOG_COMPONENT_NAME_MAP, false, "flow-");
-  std_log_config.init_component_names<ipc::Log_component>(ipc::S_IPC_LOG_COMPONENT_NAME_MAP, false, "ipc-");
-  Simple_ostream_logger std_logger(&std_log_config);
-  FLOW_LOG_SET_CONTEXT(&std_logger, Flow_log_component::S_UNCAT);
-  // This is separate: the IPC/Flow logging will go into this file.
-  const auto log_file = (argc >= 2) ? String_view(argv[1]) : LOG_FILE;
-  FLOW_LOG_INFO("Opening log file [" << log_file << "] for IPC/Flow logs only.");
-  Config log_config = std_log_config;
-  log_config.configure_default_verbosity(Sev::S_DATA, true); // High-verbosity.  Use S_INFO in production.
-  /* First arg: could use &std_logger to log-about-logging to console; but it's a bit heavy for such a console-dependent
-   * little program.  Just just send it to /dev/null metaphorically speaking. */
-  Async_file_logger log_logger(nullptr, &log_config, log_file, false /* No rotation; we're no serious business. */);
+  optional<Simple_ostream_logger> std_logger;
+  optional<Async_file_logger> log_logger;
+  setup_log_cfg(&std_logger, &log_logger, argc, argv, false);
+  FLOW_LOG_SET_CONTEXT(&(*std_logger), Flow_log_component::S_UNCAT);
 
   try
   {
@@ -78,7 +61,7 @@ int main(int argc, char const * const * argv)
     ensure_run_env(argv[0], true);
 
     using Session_server = ipc::session::shm::classic::Session_server<ipc::session::schema::MqType::BIPC, false>;
-    Session_server srv(&log_logger, SRV_APPS.find(SRV_NAME)->second, CLI_APPS);
+    Session_server srv(&(*log_logger), SRV_APPS.find(SRV_NAME)->second, CLI_APPS);
 
     FLOW_LOG_INFO("Session-server started; invoke session-client executable from same CWD; it will open session with "
                   "1 init-channel; at that point we will send a message and be satisfied and exit.");
@@ -90,33 +73,22 @@ int main(int argc, char const * const * argv)
 
     using Session = decltype(srv)::Server_session_obj;
     Session session;
-    promise<void> accepted_promise;
-    bool ok = false;
+    promise<Error_code> accepted_promise;
     Session_server::Channels chans;
     srv.async_accept(&session, &chans, nullptr, nullptr,
                      [](auto&&...) -> size_t { return 1; }, // 1 init-channel to open.
                      [](auto&&...) {},
-                     [&](const Error_code& err_code)
+                     [&](const Error_code& async_err_code)
     {
-      if (err_code)
-      {
-        FLOW_LOG_WARNING("Error is totally unexpected.  Error: [" << err_code << "] [" << err_code.message() << "].");
-      }
-      else
-      {
-        FLOW_LOG_INFO("Session accepted: [" << session << "].");
-        ok = true;
-      }
-      // Either way though:
-      accepted_promise.set_value();
+      accepted_promise.set_value(async_err_code);
     });
 
-    accepted_promise.get_future().wait();
-    if (!ok)
+    if (accepted_promise.get_future().get())
     {
-      return BAD_EXIT;
+      throw Runtime_error(err_code, "totally unexpected error while accepting");
     }
     // else
+    FLOW_LOG_INFO("Session accepted: [" << session << "].");
 
     session.init_handlers([](const Error_code&) {});
     /* Session in PEER state (opened fully); so channel is ready too.  Upgrade to struc::Channel; then send a
@@ -125,12 +97,14 @@ int main(int argc, char const * const * argv)
     /* BTW compare to the simplicity of this type+ctor signature/call versus ipc_transport_structured's main.cpp.
      * That's ipc::session's presence at work. */
     Session::Structured_channel<link_test::FunBody>
-      chan(&log_logger, std::move(chans.front()),
+      chan(&(*log_logger), std::move(chans.front()),
            ipc::transport::struc::Channel_base::S_SERIALIZE_VIA_SESSION_SHM, &session);
-    chan.start([](const Error_code&) {});
+    chan.start([](auto&&...) {});
 
     auto msg = chan.create_msg();
-    msg.body_root()->initCoolMsg().setCoolVal(42);
+    auto msg_root = msg.body_root()->initCoolMsg();
+    msg_root.setCoolVal(42);
+    msg_root.setCoolString("Hello, world!");
     FLOW_LOG_INFO("Sending a structured message over pre-opened channel.");
     chan.send(msg);
 
@@ -146,7 +120,7 @@ int main(int argc, char const * const * argv)
   catch (const exception& exc)
   {
     FLOW_LOG_WARNING("Caught exception: [" << exc.what() << "].");
-    return BAD_EXIT;
+    return 1;
   }
 
   return 0;

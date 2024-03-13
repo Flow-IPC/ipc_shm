@@ -73,3 +73,36 @@ void ensure_run_env(const char* argv0, bool srv_else_cli)
                                            "try again please.  I.e., the CWD must contain the executable."));
   }
 }
+
+// Globals are cheesy, we know.  Must exist throughout the logger's existence; this is an easy way in our little app.
+static std::optional<flow::log::Config> std_log_config;
+static std::optional<flow::log::Config> log_config;
+
+void setup_log_cfg(std::optional<flow::log::Simple_ostream_logger>* std_logger,
+                   std::optional<flow::log::Async_file_logger>* log_logger,
+                   int argc, char const * const * argv, bool srv_else_cli)
+{
+  using flow::util::String_view;
+  using flow::util::ostream_op_string;
+  using flow::log::Sev;
+  using flow::Flow_log_component;
+
+  // Console logger setup.
+  std_log_config.emplace();
+  std_log_config->init_component_to_union_idx_mapping<Flow_log_component>
+    (1000, Config::standard_component_payload_enum_sparse_length<Flow_log_component>());
+  std_log_config->init_component_to_union_idx_mapping<ipc::Log_component>
+    (2000, Config::standard_component_payload_enum_sparse_length<ipc::Log_component>());
+  std_log_config->init_component_names<Flow_log_component>(flow::S_FLOW_LOG_COMPONENT_NAME_MAP, false, "flow-");
+  std_log_config->init_component_names<ipc::Log_component>(ipc::S_IPC_LOG_COMPONENT_NAME_MAP, false, "ipc-");
+  std_logger->emplace(&(*std_log_config));
+  FLOW_LOG_SET_CONTEXT(&(*std_logger), Flow_log_component::S_UNCAT);
+
+  // This is separate: the IPC/Flow logging will go into this file.
+  const auto log_file = (argc >= 2) ? String_view(argv[1]) : String_view(LOG_FILE);
+  const auto LOG_FILE = ostream_op_string(S_EXEC_PREFIX, srv_else_cli ? SRV_NAME : CLI_NAME, ".log");
+  FLOW_LOG_INFO("Opening log file [" << *log_file << "] for IPC/Flow logs only.");
+  log_config.emplace(*std_log_config);
+  log_config->configure_default_verbosity(Sev::S_DATA, true); // High-verbosity.  Use S_INFO in production.
+  log_logger->emplace(nullptr, &(*log_config), log_file, false /* No rotation; we're no serious business. */);
+}

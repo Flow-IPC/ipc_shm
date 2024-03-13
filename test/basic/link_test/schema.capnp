@@ -38,4 +38,5 @@ struct FunBody
 struct CoolMsg
 {
   coolVal @0 :Common.Size;
+  coolString @1 :Text;
 }
