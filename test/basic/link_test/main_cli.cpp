@@ -76,7 +76,7 @@ int main(int argc, char const * const * argv)
     {
       const auto msg_root = msg->body_root().getCoolMsg();
       FLOW_LOG_INFO("Message received with payloads "
-                    "[" << msg_root.getCoolString() >> "] and [" << msg_root.getCoolVal() << "].");
+                    "[" << msg_root.getCoolString() << "] and [" << msg_root.getCoolVal() << "].");
       done_promise.set_value();
     });
     done_promise.get_future().wait();
