@@ -37,4 +37,4 @@ void ensure_run_env(const char* argv0, bool srv_else_cli);
 // Invoke from main() to set up console and file logging.
 void setup_log_cfg(std::optional<flow::log::Simple_ostream_logger>* std_logger,
                    std::optional<flow::log::Async_file_logger>* log_logger,
-                   int argc, char const * const * argv, bool srv_else_cli)
+                   int argc, char const * const * argv, bool srv_else_cli);

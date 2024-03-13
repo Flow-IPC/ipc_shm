@@ -84,6 +84,7 @@ void setup_log_cfg(std::optional<flow::log::Simple_ostream_logger>* std_logger,
 {
   using flow::util::String_view;
   using flow::util::ostream_op_string;
+  using flow::log::Config;
   using flow::log::Sev;
   using flow::Flow_log_component;
 

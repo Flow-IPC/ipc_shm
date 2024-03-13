@@ -83,7 +83,8 @@ int main(int argc, char const * const * argv)
       accepted_promise.set_value(async_err_code);
     });
 
-    if (accepted_promise.get_future().get())
+    const auto err_code = accepted_promise.get_future().get();
+    if (err_code)
     {
       throw Runtime_error(err_code, "totally unexpected error while accepting");
     }
