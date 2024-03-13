@@ -38,7 +38,7 @@ int main(int argc, char const * const * argv)
    * Log_context to do this very trivially, but we just have the one function, main(), so far so: */
   optional<Simple_ostream_logger> std_logger;
   optional<Async_file_logger> log_logger;
-  setup_log_cfg(&std_logger, &log_logger, argc, argv, false);
+  setup_logging(&std_logger, &log_logger, argc, argv, false);
   FLOW_LOG_SET_CONTEXT(&(*std_logger), Flow_log_component::S_UNCAT);
 
   try

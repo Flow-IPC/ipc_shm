@@ -19,8 +19,6 @@
 #include "schema.capnp.h"
 #include <ipc/transport/bipc_mq_handle.hpp>
 #include <ipc/session/shm/classic/session_server.hpp>
-#include <flow/log/simple_ostream_logger.hpp>
-#include <flow/log/async_file_logger.hpp>
 
 /* This little thing is *not* a unit-test; it is built to ensure the proper stuff links through our
  * build process.  We try to use a compiled thing or two; and a template (header-only) thing or two;
@@ -41,7 +39,7 @@ int main(int argc, char const * const * argv)
    * Log_context to do this very trivially, but we just have the one function, main(), so far so: */
   optional<Simple_ostream_logger> std_logger;
   optional<Async_file_logger> log_logger;
-  setup_log_cfg(&std_logger, &log_logger, argc, argv, false);
+  setup_logging(&std_logger, &log_logger, argc, argv, true);
   FLOW_LOG_SET_CONTEXT(&(*std_logger), Flow_log_component::S_UNCAT);
 
   try
@@ -78,9 +76,9 @@ int main(int argc, char const * const * argv)
     srv.async_accept(&session, &chans, nullptr, nullptr,
                      [](auto&&...) -> size_t { return 1; }, // 1 init-channel to open.
                      [](auto&&...) {},
-                     [&](const Error_code& async_err_code)
+                     [&](const Error_code& err_code)
     {
-      accepted_promise.set_value(async_err_code);
+      accepted_promise.set_value(err_code);
     });
 
     const auto err_code = accepted_promise.get_future().get();
@@ -91,7 +89,7 @@ int main(int argc, char const * const * argv)
     // else
     FLOW_LOG_INFO("Session accepted: [" << session << "].");
 
-    session.init_handlers([](const Error_code&) {});
+    session.init_handlers([](auto&&...) {});
     /* Session in PEER state (opened fully); so channel is ready too.  Upgrade to struc::Channel; then send a
      * (SHM-backed) message. */
 
