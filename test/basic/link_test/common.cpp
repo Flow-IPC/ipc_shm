@@ -42,7 +42,6 @@ const ipc::session::Server_app::Master_set SRV_APPS
                { CLI_NAME }, // Allowed cli-apps that can open sessions.
                WORK_DIR,
                ipc::util::Permissions_level::S_GROUP_ACCESS } } });
-
 // Universe of client apps: Just one.
 const ipc::session::Client_app::Master_set CLI_APPS
         {
@@ -52,11 +51,10 @@ const ipc::session::Client_app::Master_set CLI_APPS
               {
                 CLI_NAME,
                 /* The ipc::session security model is such that the binary must be invoked *exactly* using the
-                * command listed here.  In *nix land at least this is how that is likely to look.
-                * (In a production scenario this would be a canonical (absolute, etc.) path.) */
+                 * command listed here.  In *nix land at least this is how that is likely to look.
+                 * (In a production scenario this would be a canonical (absolute, etc.) path.) */
                 fs::path(".") / (S_EXEC_PREFIX + CLI_NAME + S_EXEC_POSTFIX),
-                ::geteuid(),
-                ::getegid()
+                ::geteuid(), ::getegid()
               }
             }
           }
@@ -74,10 +72,6 @@ void ensure_run_env(const char* argv0, bool srv_else_cli)
   }
 }
 
-// Globals are cheesy, we know.  Must exist throughout the logger's existence; this is an easy way in our little app.
-static std::optional<flow::log::Config> std_log_config;
-static std::optional<flow::log::Config> log_config;
-
 void setup_log_cfg(std::optional<flow::log::Simple_ostream_logger>* std_logger,
                    std::optional<flow::log::Async_file_logger>* log_logger,
                    int argc, char const * const * argv, bool srv_else_cli)
@@ -87,6 +81,11 @@ void setup_log_cfg(std::optional<flow::log::Simple_ostream_logger>* std_logger,
   using flow::log::Config;
   using flow::log::Sev;
   using flow::Flow_log_component;
+  using std::optional;
+
+  // Must exist throughout the logger's existence; this is an easy way in our little app.
+  static optional<Config> std_log_config;
+  static optional<Config> log_config;
 
   // Console logger setup.
   std_log_config.emplace();
