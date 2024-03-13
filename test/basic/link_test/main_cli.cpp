@@ -65,13 +65,12 @@ int main(int argc, char const * const * argv)
     session.sync_connect(session.mdt_builder(), nullptr, nullptr, &chans); // Let it throw on error.
     FLOW_LOG_INFO("Session/channels opened.  Awaiting one message; then exiting.");
 
-    promise<void> done_promise;
-
     Session::Structured_channel<link_test::FunBody>
       chan(&(*log_logger), std::move(chans.front()),
            ipc::transport::struc::Channel_base::S_SERIALIZE_VIA_SESSION_SHM, &session);
     chan.start([](auto&&...) {});
 
+    promise<void> done_promise;
     chan.expect_msg(link_test::FunBody::COOL_MSG, [&](auto&& msg)
     {
       const auto msg_root = msg->body_root().getCoolMsg();
