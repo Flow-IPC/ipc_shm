@@ -102,7 +102,7 @@ void setup_log_cfg(std::optional<flow::log::Simple_ostream_logger>* std_logger,
   // This is separate: the IPC/Flow logging will go into this file.
   const auto LOG_FILE = ostream_op_string(S_EXEC_PREFIX, srv_else_cli ? SRV_NAME : CLI_NAME, ".log");
   const auto log_file = (argc >= 2) ? String_view(argv[1]) : String_view(LOG_FILE);
-  FLOW_LOG_INFO("Opening log file [" << *log_file << "] for IPC/Flow logs only.");
+  FLOW_LOG_INFO("Opening log file [" << log_file << "] for IPC/Flow logs only.");
   log_config.emplace(*std_log_config);
   log_config->configure_default_verbosity(Sev::S_DATA, true); // High-verbosity.  Use S_INFO in production.
   log_logger->emplace(nullptr, &(*log_config), log_file, false /* No rotation; we're no serious business. */);
