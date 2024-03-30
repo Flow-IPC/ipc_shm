@@ -27,7 +27,7 @@ set(PROJ_CAMEL "IpcShm")
 set(PROJ_HUMAN "Flow-IPC (SHM)")
 
 set(OS_SUPPORT_MSG "Only Linux is supported for now.  For ipc_shm: It might be entirely portably "
-                     "written (not counting its dependencies) hence might just need testing in macOS/BSD and Windows.")
+                     "written (not counting its dependencies) hence might just need testing in macOS/etc. and Windows.")
 # Subtext: Off the top of one's head it doesn't, itself, have non-portable code; but this requires looking-into
 # and testing.
 # (That's after ensuring ipc_transport_structured is supported in the OS in question first.)
