@@ -128,7 +128,7 @@ public:
    * Why `bipc::list` and not `std::list`?  Answer:
    * `std::list`, at least in gcc-8.3.0, gave a compile error fairly clearly implying `std::list` stores
    * `Node*` instead of `Allocator<Node>::pointer`; in other words it is not compatible with SHM
-   * (which bipc docs did claim -- but that could easily have been outdated).
+   * (which bipc docs did warn people about -- but that could easily have been outdated).
    *
    * Curiously `std::vector` did not have that problem and worked fine, as far as that went, but we prefer
    * a linked-list here.
@@ -355,7 +355,7 @@ void Capnp_message_builder<Shm_arena>::lend
 
   /* Process-count in m_serialization_segments incremented ahead of transmission (this is logged), probably to 2
    * (higher if lend() called more than 1x).
-   * Now underlying SHM-stored segments won't de dealloc-ed until the other side receives it and later indicates
+   * Now underlying SHM-stored segments won't be dealloc-ed until the other side receives it and later indicates
    * that process is done with them (if send succeeds) + *this is destroyed. */
 } // Capnp_message_builder::lend()
 
@@ -404,7 +404,7 @@ kj::ArrayPtr<::capnp::word>
 
   /* capnp requires: it must be zeroed.  And Basic_blob ctor we used does *not* zero it.  So memset() it.
    * Caution!  If you choose to change-over to vector<..., util::Default_init_allocator<...>> instead, then
-   * you'll need to add `std::memset(buf_ptr, 0, seg_sz)` here. */
+   * you'll still need to keep `std::memset(buf_ptr, 0, seg_sz)` here. */
   memset(buf_ptr, 0, seg_sz);
 
   // Since we are supposed to grow exponentially, increase this for next time (if any):
