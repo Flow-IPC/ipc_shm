@@ -47,6 +47,7 @@ set(SRCS
     ipc/session/detail/shm/classic/session_shared_name.cpp
     ipc/shm/classic/error.cpp
     ipc/shm/classic/pool_arena.cpp
+    ipc/transport/struc/shm/error.cpp
     ipc/transport/struc/shm/util.cpp)
 set(CAPNP_SCHEMAS
     ipc/transport/struc/shm/schema/common.capnp
@@ -76,6 +77,7 @@ set(HDRS
     ipc/transport/struc/shm/capnp_msg_builder.hpp
     ipc/transport/struc/shm/classic/classic.hpp
     ipc/transport/struc/shm/classic/classic_fwd.hpp
+    ipc/transport/struc/shm/error.hpp
     ipc/transport/struc/shm/serializer.hpp
     ipc/transport/struc/shm/shm_fwd.hpp
     ${CAPNP_SCHEMAS}) # Export these like any regular headers...

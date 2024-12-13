@@ -19,7 +19,9 @@
 #pragma once
 
 #include "ipc/transport/struc/heap_serializer.hpp"
+#include "ipc/transport/struc/shm/error.hpp"
 #include "ipc/transport/struc/shm/capnp_msg_builder.hpp"
+#include <flow/error/error.hpp>
 #include <boost/move/make_unique.hpp>
 
 namespace ipc::transport::struc::shm
@@ -62,7 +64,7 @@ public:
  * there is no limit at all on the size/complexity of what one mutates over payload_msg_builder().  In fact `*this`
  * provides the "2-layer approach" specified in that doc header section you just came back from reading.
  *
- * The only realistic failure mode in `*this` is the following:
+ * There are two realistic failure modes in `*this`.  The first is the following:
  *   -# User attempts to mutate via payload_msg_builder().
  *   -# capnp internals recognize the current segment is used up and asks for a new segment of at least N bytes.
  *   -# `*this` asks the SHM provider (see template param docs below) to allocate >=N bytes.
@@ -75,6 +77,9 @@ public:
  * to control.  The only remedy: choose a SHM provider that does not run out of space beyond simply running out of
  * RAM; e.g., by mapping more SHM pools, or whatever.  Otherwise, all the user can do is catch the `bad_alloc`-like
  * exception around their mutations on payload_msg_builder() and take whatever contingency steps.
+ *
+ * The second failure mode is emit_serialization() failing.  See its doc header for more information.
+ * In a similar key, Reader::deserialization() can fail down the line.  See its doc header for more information.
  *
  * @see shm::Reader
  *      Counterpart Struct_reader implementation that can deserialize data that this has serialized.
@@ -97,6 +102,8 @@ public:
  *         return (in the receiving process) `Handle<T>` that points to the same SHM-stored data structure originally
  *         returned by `construct()`.  In addition `Shm_arena` must be compatible with `Stateless_allocator`
  *         requirements as explained in "Additional formal requirements" below.
+ *         Lastly, `lend_object()` and `borrow_object()` may return an empty blob/null respectively, indicating
+ *         (assuming proper inputs) the session is permanently down (opposing process is likely down/closed session).
  *
  * ### Additional formal requirements w/r/t `Shm_arena` ###
  * Information on `T` that `*this` shall use with `Shm_arena::construct<T>()`: As of this writing it is
@@ -253,10 +260,10 @@ public:
    * Implements concept API.
    *
    * ### Errors ###
-   * As implied in class doc header, the top serialization is just a small SHM-handle, so
-   * error::Code::S_INTERNAL_ERROR_SERIALIZE_LEAF_TOO_BIG is not realistically possible.
+   * error::Code::S_SERIALIZE_FAILED_SESSION_HOSED is eminently possible with at least some providers
+   * (as of this writing not SHM-classic, yes SHM-jemalloc).  Be ready for this eventuality.
    *
-   * As of this writing no other failure modes exist.  However see "Failure mode" notes in payload_msg_builder() doc
+   * See also "Failure mode" notes in payload_msg_builder() doc
    * header.  These would manifest before one would have a chance to emit_serialization() though.
    *
    * @param target_blobs
@@ -268,7 +275,10 @@ public:
    * @param session
    *        See above.  In this case... just... see #Session.
    * @param err_code
-   *        See above.  Long story short: in practice never fails.
+   *        See above.  #Error_code generated: error::Code::S_SERIALIZE_FAILED_SESSION_HOSED (the SHM-session was
+   *        unable to encode the location of the serialization in SHM, for the benefit of the opposing process that
+   *        would deserialize this, because session's `lend_object()` method indicated
+   *        the session is down).
    *
    * @see Struct_builder::emit_serialization(): implemented concept.
    */
@@ -430,12 +440,15 @@ public:
    *         See above.
    * @param err_code
    *        See above.  #Error_code generated:
-   *        error::Code::S_DESERIALIZE_FAILED_INSUFFICIENT_SEGMENTS (add_serialization_segment() was never called;
+   *        struc::error::Code::S_DESERIALIZE_FAILED_INSUFFICIENT_SEGMENTS (add_serialization_segment() never called;
    *        or somehow opposing builder serialized an empty segment list -- this would be a bug on their part),
-   *        error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED (add_serialization_segment()-returned segment
+   *        struc::error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED (add_serialization_segment()-returned segment
    *        was modified subsequently to start at a misaligned address; or somehow the opposing
-   *        builder supplied a segment that starts at a misalidnged address -- this would be a bug on their
-   *        part).
+   *        builder supplied a segment that starts at a misaligned address -- this would be a bug on their
+   *        part),
+   *        error::Code::S_DESERIALIZE_FAILED_SESSION_HOSED (the SHM-session was unable to determine the location
+   *        of the serialization in SHM, because its `borrow_object()` method indicated the session is down, or the
+   *        information transmitted over IPC was in some way invalid).
    * @return See above.
    *
    * @see Struct_reader::deserialization(): implemented concept.
@@ -552,8 +565,16 @@ Capnp_msg_builder_interface* CLASS_SHM_BUILDER::payload_msg_builder()
 
 TEMPLATE_SHM_BUILDER
 void CLASS_SHM_BUILDER::emit_serialization(Segment_ptrs* target_blobs, const Session& session,
-                                           Error_code* err_code_or_null) const
+                                           Error_code* err_code) const
 {
+  if (flow::error::exec_void_and_throw_on_error
+        ([&](Error_code* actual_err_code) { emit_serialization(target_blobs, session, actual_err_code); },
+         err_code, "shm::Builder::emit_serialization()"))
+  {
+    return;
+  }
+  // ^-- Call ourselves and return if err_code is null.  If got to present line, err_code is not null.
+
   assert(m_btm_engine && "Are you operating on a moved-from `*this`?");
 
   /* Key subtlety: It may seem correct here to do initRoot<>(), not getRoot<>(), but that would be wrong:
@@ -582,7 +603,12 @@ void CLASS_SHM_BUILDER::emit_serialization(Segment_ptrs* target_blobs, const Ses
    * and complex structure.)  Also it ups the process-owner ref-count from 1 (us) to 2 (us + them), so that our
    * dtor won't blow away the SHM-stored data structure unless Reader has already invoked its dtor too.
    * (If this is emit_serialization() #2, then the ref-count grows potentially to 3, etc.) */
-  m_btm_engine->lend(&root, session); // Target *root; put the outer SHM handle's encoding there.
+  if (!m_btm_engine->lend(&root, session)) // Target *root; put the outer SHM handle's encoding there.
+  {
+    *err_code = error::Code::S_SERIALIZE_FAILED_SESSION_HOSED;
+    return; // It logged already.
+  }
+  // else
 
   /* Secondly obtain that resulting top (local-heap) serialization.  This will emit error as needed.
    * In reality there is only one possible error condition (as documented): S_INTERNAL_ERROR_SERIALIZE_LEAF_TOO_BIG.
@@ -598,9 +624,9 @@ void CLASS_SHM_BUILDER::emit_serialization(Segment_ptrs* target_blobs, const Ses
 #ifndef NDEBUG
   const size_t n_target_blobs_orig = target_blobs->size();
 #endif
-  m_top_engine.emit_serialization(target_blobs, NULL_SESSION, err_code_or_null);
+  m_top_engine.emit_serialization(target_blobs, NULL_SESSION, err_code);
 
-  assert(((err_code_or_null && *err_code_or_null)
+  assert((*err_code
           || (target_blobs->size() == (n_target_blobs_orig + 1)))
          && "We guarantee the top serialization consists of exactly 1 segment (storing SHM handle), no more.");
 } // Builder::emit_serialization()
@@ -720,7 +746,11 @@ typename Struct::Reader CLASS_SHM_READER::deserialization(Error_code* err_code)
      * (but read-only: we will never modify it, even if *m_arena is opened for read-write). */
     m_btm_serialization_shm_handle = m_session->template borrow_object<Segments_in_shm>(handle_serialization_blob);
   }
-  assert(m_btm_serialization_shm_handle);
+  if (!m_btm_serialization_shm_handle)
+  {
+    return emit_error(error::Code::S_DESERIALIZE_FAILED_SESSION_HOSED);
+  }
+  // else
 
   /* Subtlety: We are about to work with serialization_segments, an STL-compliant structure stored directly in
    * SHM.  In so doing we'll have to traverse it with iterators and so on.  Needn't we do some kind of
@@ -772,7 +802,7 @@ typename Struct::Reader CLASS_SHM_READER::deserialization(Error_code* err_code)
     FLOW_LOG_WARNING("shm::Reader [" << *this << "]: The top serialization was valid; and the SHM handle "
                      "therein does point to a list of segments; but that list is empty.  Emitting error.  "
                      "Other side misbehaved?");
-    return emit_error(error::Code::S_DESERIALIZE_FAILED_INSUFFICIENT_SEGMENTS);
+    return emit_error(struc::error::Code::S_DESERIALIZE_FAILED_INSUFFICIENT_SEGMENTS);
   }
   // else
 
@@ -795,7 +825,7 @@ typename Struct::Reader CLASS_SHM_READER::deserialization(Error_code* err_code)
                        "Starting pointer is not this-architecture-word-aligned.  Bug?  "
                        "Misuse of Builder?  Other side misbehaved?  "
                        "Misalignment is against the API use requirements; capnp would complain and fail.");
-      return emit_error(error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED);
+      return emit_error(struc::error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED);
     }
     // else
 
