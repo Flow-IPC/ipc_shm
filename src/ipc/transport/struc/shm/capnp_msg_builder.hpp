@@ -180,11 +180,14 @@ public:
    * because" it can be; nothing in particular needed it.
    *
    * @param capnp_root
-   *        The target SHM-handle serialization root to populate as noted above.
+   *        The target SHM-handle serialization root to populate as noted above.  Untouched if `false` returned.
    * @param shm_session
    *        `Shm_session` to the opposing recipient to which we are lending.
+   * @return `true` on success; `false` if and only if `shm_session->lend_object()` failed (returned empty blob).
+   *         Assuming general buglessness of the code up to this point the latter means the session is permanently
+   *         down; which is eminently possible in a normally functioning system.
    */
-  void lend(schema::detail::ShmTopSerialization::Builder* capnp_root,
+  bool lend(schema::detail::ShmTopSerialization::Builder* capnp_root,
             session::shm::Arena_to_shm_session_t<Arena>* shm_session);
 
   /**
@@ -258,7 +261,7 @@ Capnp_message_builder<Shm_arena>::~Capnp_message_builder()
 }
 
 template<typename Shm_arena>
-void Capnp_message_builder<Shm_arena>::lend
+bool Capnp_message_builder<Shm_arena>::lend
        (schema::detail::ShmTopSerialization::Builder* capnp_root,
         session::shm::Arena_to_shm_session_t<Arena>* shm_session)
 {
@@ -347,6 +350,22 @@ void Capnp_message_builder<Shm_arena>::lend
 
   // Source blob (bits encoding handle):
   const auto handle_serialization_blob = shm_session->template lend_object<Segments_in_shm>(m_serialization_segments);
+
+  if (handle_serialization_blob.empty())
+  {
+    /* This can surely happen; perhaps we are the first to notice the session being down (or our user has ignored
+     * any earlier sign(s) such as channel/session error handler(s) firing).  It is interesting and should be rare
+     * (not verbose), so a high-severity log message seems worthwhile (even if other similarly-themed messages
+     * might appear nearby). */
+    FLOW_LOG_WARNING("SHM builder [" << *this << "]: "
+                     "After finalizing capnp-serialization in a SHM arena, SHM-session failed to register "
+                     "attempt to lend a SHM-handle to this serialization to the opposing process.  "
+                     "The data structure cannot be transmitted to the opposing process.  Assuming no bugs "
+                     "up to this point, the session is down (usually means opposing process is down).");
+    return false;
+  }
+  // else
+
   // Target SHM handle (inside capnp struct).  Avoid wasting internal serialization space if already init...()ed.
   auto capnp_segment_list_in_shm = capnp_root->hasSegmentListInShm() ? capnp_root->getSegmentListInShm()
                                                                      : capnp_root->initSegmentListInShm();
@@ -357,6 +376,8 @@ void Capnp_message_builder<Shm_arena>::lend
    * (higher if lend() called more than 1x).
    * Now underlying SHM-stored segments won't be dealloc-ed until the other side receives it and later indicates
    * that process is done with them (if send succeeds) + *this is destroyed. */
+
+  return true;
 } // Capnp_message_builder::lend()
 
 template<typename Shm_arena>

@@ -83,6 +83,8 @@ class Capnp_message_builder;
  *        Non-null (or behavior undefined/assertion may trip) pointer to `ShmHandle` builder to mutate.
  * @param lend_result
  *        What `lend_object<T>()` returned.  Not `.empty()`, or behavior undefined (assertion may trip).
+ *        Reminder: if that returned `.empty()`, the session is likely hosed, and you cannot transmit SHM objects
+ *        between the two endpoints, so there is no point in calling us.
  */
 void capnp_set_lent_shm_handle(schema::ShmHandle::Builder* shm_handle_root,
                                const flow::util::Blob_sans_log_context& lend_result);
@@ -94,7 +96,7 @@ void capnp_set_lent_shm_handle(schema::ShmHandle::Builder* shm_handle_root,
  *        `ShmHandle` reader to access.  Behavior undefined if was not set by capnp_set_lent_shm_handle().
  * @param arg_to_borrow
  *        Shall be set to what to pass to `borrow_object<T>()` (non-null pointer or behavior undefined/assertion
- *        may trip).  `arg_to_borrow->get_logger()` shall not be modified; so set it what you want, if you want.
+ *        may trip).  `arg_to_borrow->get_logger()` shall not be modified; so set it to what you want, if you want.
  */
 void capnp_get_shm_handle_to_borrow(const schema::ShmHandle::Reader& shm_handle_root,
                                     flow::util::Blob_sans_log_context* arg_to_borrow);

@@ -30,7 +30,8 @@ void capnp_set_lent_shm_handle(schema::ShmHandle::Builder* shm_handle_root,
 {
   using util::Blob_mutable;
 
-  assert(!lend_result.empty());
+  assert((!lend_result.empty()) && "Did you account for shm_session.lend_object() returning empty blob "
+                                     "(likely session down)?");
   assert(shm_handle_root);
 
   const auto n = lend_result.size();
