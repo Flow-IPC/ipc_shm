@@ -106,11 +106,11 @@ std::string Category::message(int val) const // Virtual.
   switch (static_cast<Code>(val))
   {
   case Code::S_SERIALIZE_FAILED_SESSION_HOSED:
-    return "Structured message serialization: SHM-session lend_object() indicated failure when preparing an encoding "
+    return "Structured message serialization: SHM-session `lend_object()` indicated failure when preparing an encoding "
            "of the location-in-SHM of the message's serialization; the session should be assumed to be down, and "
            "the opposing process cannot be reached.";
   case Code::S_DESERIALIZE_FAILED_SESSION_HOSED:
-    return "Structured message deserialization: SHM-session borrow_object() indicated failure when interpreting "
+    return "Structured message deserialization: SHM-session `borrow_object()` indicated failure when interpreting "
            "an encoding of the location-in-SHM of the message's serialization; the session should be assumed to "
            "be down, and the opposing process cannot be reached.";
 
