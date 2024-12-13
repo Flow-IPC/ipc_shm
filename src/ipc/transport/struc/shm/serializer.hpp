@@ -338,7 +338,7 @@ private:
  * ### How shm::Reader::Session (a/k/a `Shm_session`) is used by a `*this` ###
  * shm::Builder, internally, performs `Shm_arena::construct<T>()` to allocate a STL-compliant data structure
  * and yield a `Shm_session`-lendable outer SHM handle.  It performs `Shm_session::lend_object<T>()` in
- * shm::Builder::emit_serialization(), registering the recepient-to-be process as the 2nd owner process.
+ * shm::Builder::emit_serialization(), registering the recipient-to-be process as the 2nd owner process.
  * Then the counterpart `*this` performs `Shm_session::borrow_object<T>()` to recover the equivalent
  * outer SHM handle to the same STL-compliant data structure the user had built up via
  * shm::Builder::payload_msg_builder().
@@ -566,7 +566,7 @@ void CLASS_SHM_BUILDER::emit_serialization(Segment_ptrs* target_blobs, const Ses
    * Of course that is to be questioned; we justify it as follows: getRoot<>() could be done in ctor, and we could
    * cache the result there; instead we do it lazily on-demand -- a pattern that's a typical justification
    * for `mutable` (and the following is essentially a smaller-scoped `mutable`).  The first time it's done
-   * it create the root (which would otherwise be done in ctor); next time it does nothing; then in either case
+   * it creates the root (which would otherwise be done in ctor); next time it does nothing; then in either case
    * `root` becomes the same value.
    */
   auto root = const_cast<Heap_fixed_builder&>(m_top_engine)
@@ -678,7 +678,8 @@ typename Struct::Reader CLASS_SHM_READER::deserialization(Error_code* err_code)
   constexpr Capnp_heap_engine_opts RDR_OPTIONS = { std::numeric_limits<uint64_t>::max() / sizeof(word),
                                                    Capnp_heap_engine_opts{}.nestingLimit };
 
-  // Helper to emit error via usual semantics.  We return a ref so can't use FLOW_ERROR_EXEC_AND_THROW_ON_ERROR().
+  /* Helper to emit error via usual semantics.  We return a ref so can't use FLOW_ERROR_EXEC_AND_THROW_ON_ERROR().
+   * @todo Wait... we don't return a ref.  Small maintenance mistake?  Fix it up. */
   const auto emit_error = [&](const Error_code& our_err_code) -> Capnp_struct_reader
   {
     if (err_code)

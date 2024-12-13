@@ -94,7 +94,7 @@ void capnp_set_lent_shm_handle(schema::ShmHandle::Builder* shm_handle_root,
  *        `ShmHandle` reader to access.  Behavior undefined if was not set by capnp_set_lent_shm_handle().
  * @param arg_to_borrow
  *        Shall be set to what to pass to `borrow_object<T>()` (non-null pointer or behavior undefined/assertion
- *        may trip).  `arg_to_borrow->get_logger()` shall not be modified; so set it what you want, if you want.
+ *        may trip).  `arg_to_borrow->get_logger()` shall not be modified; so set it to what you want, if you want.
  */
 void capnp_get_shm_handle_to_borrow(const schema::ShmHandle::Reader& shm_handle_root,
                                     flow::util::Blob_sans_log_context* arg_to_borrow);
