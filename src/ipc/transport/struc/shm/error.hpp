@@ -41,7 +41,7 @@ enum class Code
    * of the location-in-SHM of the message's serialization; the session should be assumed to be down, and the opposing
    * process cannot be reached.
    */
-  S_SERIALIZE_FAILED_SESSION_HOSED,
+  S_SERIALIZE_FAILED_SESSION_HOSED = S_CODE_LOWEST_INT_VALUE,
 
   /**
    * Structured message deserialization: SHM-session `borrow_object()` indicated failure when interpreting an encoding
