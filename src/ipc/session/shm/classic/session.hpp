@@ -288,7 +288,7 @@ public:
 
   /**
    * When transmitting items originating in #Arena session_shm() via
-   * transport::struc::shm::Builder::emit_serialization()(and/or transport::struc::Channel send facilities), returns
+   * transport::struc::shm::Builder::emit_serialization() (and/or transport::struc::Channel send facilities), returns
    * additional-to-payload information necessary to target the opposing process properly.
    *
    * Internally: Since `*this` type is based on the arena-sharing SHM-provider type (SHM-classic), this is simply
