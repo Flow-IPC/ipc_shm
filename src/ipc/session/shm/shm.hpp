@@ -25,8 +25,8 @@ namespace ipc::session::shm
 
 /**
  * Implementation of #Arena_to_shm_session_t.  See specializations which actually contain the mapping for
- * specific `Arena` types; for example: classic::Arena_to_shm_session,
- * arena_lend::jemalloc::Arena_to_shm_session.
+ * specific `Arena` types; for example: `Arena_to_shm_session<shm::classic::Pool_arena>`,
+ * `Arena_to_shm_session<shm::arena_lend::jemalloc::Ipc_arena>`.
  */
 template<typename Arena>
 struct Arena_to_shm_session
