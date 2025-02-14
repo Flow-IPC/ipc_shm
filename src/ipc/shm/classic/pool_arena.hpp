@@ -429,8 +429,10 @@ public:
    * it is a `ptrdiff_t`.  Returns `.empty()` object if no pool attached to `*this`.
    *
    * It is the user's responsibility to transmit the returned blob, such as via a transport::Channel or any other
-   * copying IPC mechanism, to the owning process.  Failing to do so will leak the object until remove_persistent().
-   * That process dying without running #Handle dtor(s) will similarly leak it.
+   * copying IPC mechanism, to the borrowing process and there pass it to `x->borrow_object()` (where `x`
+   * is a Pool_arena accessing the same-named SHM pool as `*this`).  Failing to do so will leak the object until
+   * remove_persistent().  That borrowing process dying without running #Handle dtor(s) on #Handle returned
+   * by `x` borrow_object() will similarly leak it until remove_persistent().
    *
    * @tparam T
    *         See construct().
