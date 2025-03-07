@@ -23,12 +23,18 @@ if(TARGET ipc_transport_structured)
   set(CAPNPC_IMPORT_DIRS ${FLOW_LIKE_META_ROOT_ipc_transport_structured}/src)
 endif()
 
-capnp_generate_cpp(capnp_generated_srcs capnp_generated_hdrs_ignored "schema.capnp")
+capnp_generate_cpp(capnp_generated_srcs capnp_generated_hdrs "schema.capnp")
+
+# Create a custom target that depends on the generated files.
+add_custom_target(ipc_shm_link_test_schema_generation DEPENDS ${capnp_generated_srcs} ${capnp_generated_hdrs})
 
 # Make a couple binaries in very similar ways; call this for each.
 function(handle_binary name_sh) # name_sh is "cli" or "srv"; as in session-client or session-server.
   set(name "ipc_shm_link_test_${name_sh}.exec") # Must match common.cpp constant values.
   add_executable(${name} common.cpp "main_${name_sh}.cpp" ${capnp_generated_srcs})
+
+  # Add explicit dependency on schema generation; otherwise things tend to go weird with a parallelized build.
+  add_dependencies(${name} ipc_shm_link_test_schema_generation)
 
   # So that schema.capnp.h is found by main.cpp's #include.
   target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
