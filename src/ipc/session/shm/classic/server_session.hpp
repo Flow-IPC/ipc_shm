@@ -23,6 +23,8 @@
 #include "ipc/session/detail/shm/classic/server_session_impl.hpp"
 #include "ipc/session/shm/classic/session.hpp"
 #include "ipc/session/server_session.hpp"
+#include "ipc/transport/struc/shm/shm_fwd.hpp"
+#include "ipc/transport/transport_fwd.hpp"
 #include <boost/move/make_unique.hpp>
 
 namespace ipc::session::shm::classic
@@ -224,6 +226,24 @@ public:
   using Base = Session_mv
                  <session::Server_session_mv
                     <Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>;
+
+  /**
+   * Server_session::Vat_network and `Client_session::Vat_network` are reasonable concrete types
+   * of template transport::struc::shm::rpc::Session_vat_network for an ipc::session user to use on opposing
+   * sides of a session; use the mainstream-form ctor to straightforwardly construct your zero-copy-enabled
+   * `Vat_network` (from a `*this`) for blazing-fast capnp-RPC.
+   */
+  using Vat_network = typename Base::Vat_network;
+
+  /// You may disregard.
+  using Async_io_obj = transport::Null_peer;
+  /// Useful for generic programming, the `sync_io`-pattern counterpart to `*this` type.
+  using Sync_io_obj = sync_io::Server_session_adapter<Server_session>;
+
+  // Constants.
+
+  /// Implements Session API per contract: equals `true`.
+  static constexpr bool S_IS_SRV_ELSE_CLI = Base::S_IS_SRV_ELSE_CLI;
 
   // Constructors/destructor.
 

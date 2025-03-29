@@ -305,7 +305,7 @@ private:
    * a reasonable guess for segment 1 size; then grow exponentially each time a new segment is requested.
    * More or less, each new segment's size equals that of the preceding segments' sizes added up.
    */
-  using Capnp_heap_engine = Capnp_message_builder<Arena>;
+  using Capnp_btm_engine = Capnp_message_builder<Arena>;
 
   // Data.
 
@@ -313,19 +313,19 @@ private:
   Heap_fixed_builder m_top_engine;
 
   /**
-   * See #Capnp_heap_engine.
+   * See #Capnp_btm_engine.
    *
    * ### Why the `unique_ptr` wrapper? ###
    * See similar section in Heap_fixed_builder::m_engine doc header.  Same thing here.
    *
    * Moreover: We also have #m_top_engine, itself a Heap_fixed_builder, which is cheaply move-ctible/assignable
    * (as of this writing another `unique_ptr` and a `size_t`).  So a move-from for us means
-   * copying those items, plus the wrapping `unique_ptr<Capnp_heap_engine>` here.  That is acceptable perf.
+   * copying those items, plus the wrapping `unique_ptr<Capnp_btm_engine>` here.  That is acceptable perf.
    * Had we not wrapped the 2 #Capnp_msg_builder_interface objects involved (this guy and the one inside
    * #m_top_engine), a move-from would lug-around something like 400+ bytes; not great.  A couple added
    * allocs/deallocs of ~8 bytes should indeed be better.
    */
-  boost::movelib::unique_ptr<Capnp_heap_engine> m_btm_engine;
+  boost::movelib::unique_ptr<Capnp_btm_engine> m_btm_engine;
 }; // class Builder
 
 /**
@@ -440,15 +440,7 @@ public:
    *         See above.
    * @param err_code
    *        See above.  #Error_code generated:
-   *        struc::error::Code::S_DESERIALIZE_FAILED_INSUFFICIENT_SEGMENTS (add_serialization_segment() never called;
-   *        or somehow opposing builder serialized an empty segment list -- this would be a bug on their part),
-   *        struc::error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED (add_serialization_segment()-returned segment
-   *        was modified subsequently to start at a misaligned address; or somehow the opposing
-   *        builder supplied a segment that starts at a misaligned address -- this would be a bug on their
-   *        part),
-   *        error::Code::S_DESERIALIZE_FAILED_SESSION_HOSED (the SHM-session was unable to determine the location
-   *        of the serialization in SHM, because its `borrow_object()` method indicated the session is down, or the
-   *        information transmitted over IPC was in some way invalid).
+   *        those emitted by Capnp_message_reader::borrow().
    * @return See above.
    *
    * @see Struct_reader::deserialization(): implemented concept.
@@ -459,27 +451,8 @@ public:
 private:
   // Types.
 
-  /// Same as in Heap_reader but this time applied to SHM-stored segments in #m_btm_serialization_shm_handle.
-  using Capnp_heap_engine = ::capnp::SegmentArrayMessageReader;
-
-  /// Alias to pointer to #Capnp_heap_engine.
-  using Capnp_heap_engine_ptr = boost::movelib::unique_ptr<Capnp_heap_engine>;
-
-  /**
-   * The data structure populated by shm::Builder counterpart.  Note, in particular, that this uses
-   * the same `Allocator` type.  *However* (as discussed as of this writing inside deserialization())
-   * we use strictly a `const` #Segments_in_shm -- read-only access only -- and therefore never *use*
-   * the actual allocator *object*; only its `pointer` type.  We never use the allocator to allocate or
-   * deallocate inner data of #Segments_in_shm.
-   *
-   * I state for your informational convenience: As of this writing this is a `list<Basic_blob>`.
-   * `Basic_blob` is very similar to `Blob` used all over the code (just SHM-friendly); and thus it is
-   * a cooler version of `vector<uint8_t>`.
-   */
-  using Segments_in_shm = typename Capnp_message_builder<Arena>::Segments_in_shm_borrowed;
-
-  /// Similar to Heap_reader::Capnp_word_array_ptr.
-  using Capnp_word_array_ptr = kj::ArrayPtr<const ::capnp::word>;
+  /// Reader counterpart to the builder's Builder::Capnp_btm_engine; this holds the actual in-SHM data.
+  using Capnp_btm_engine = Capnp_message_reader<Arena>;
 
   // Data.
 
@@ -489,17 +462,8 @@ private:
   /// The top-serialization reader, namely Heap_reader, of our simple SHM-handle-bearing schema.
   Heap_reader m_top_engine;
 
-  /// See #Capnp_heap_engine.
-  Capnp_heap_engine_ptr m_btm_engine;
-
-  /**
-   * The outer SHM handle to the #Segments_in_shm containing the serialization yielded by payload_msg_builder().
-   * It is null until deserialization() where it's assigned from `m_session->borrow_object<T>()`.
-   */
-  typename Arena::template Handle<Segments_in_shm> m_btm_serialization_shm_handle;
-
-  /// Analogous to Heap_reader::m_capnp_segments; just points into SHM.
-  std::vector<Capnp_word_array_ptr> m_btm_capnp_segments;
+  /// See #Capnp_btm_engine.
+  Capnp_btm_engine m_btm_engine;
 }; // class Reader
 
 // Free functions: in *_fwd.hpp.
@@ -534,7 +498,7 @@ CLASS_SHM_BUILDER::Builder(const Config& config) :
                  S_MAX_SERIALIZATION_SEGMENT_SZ,
                  config.m_top_builder_frame_prefix_sz, config.m_top_builder_frame_postfix_sz }),
   // The bottom-builder engine launched here.  In the future mutators will cause it to allocate in SHM on-demand.
-  m_btm_engine(boost::movelib::make_unique<Capnp_heap_engine>
+  m_btm_engine(boost::movelib::make_unique<Capnp_btm_engine>
                  (get_logger(), config.m_arena))
 {
   FLOW_LOG_TRACE("shm::Builder [" << *this << "]: SHM-heap builder started: "
@@ -652,9 +616,8 @@ CLASS_SHM_READER::Reader(const Config& config) :
   flow::log::Log_context(config.m_logger_ptr, Log_component::S_TRANSPORT),
 
   m_session(config.m_session),
-  m_top_engine({ get_logger(), 1 }) // 1 segment is sufficient for 1 damned handle.
-  /* m_btm_engine null until deserialization().
-   * m_btm_serialization_shm_handle, ditto. */
+  m_top_engine({ get_logger(), 1 }), // 1 segment is sufficient for 1 damned handle.
+  m_btm_engine(get_logger())
 {
   FLOW_LOG_TRACE("shm::Reader [" << *this << "]: SHM-heap reader started: "
                  "SHM-arena type [" << typeid(Arena).name() << "]; "
@@ -680,180 +643,33 @@ TEMPLATE_SHM_READER
 template<typename Struct>
 typename Struct::Reader CLASS_SHM_READER::deserialization(Error_code* err_code)
 {
-  using util::Blob_const;
-  using Blob = flow::util::Blob_sans_log_context;
-  using flow::error::Runtime_error;
-  using flow::util::buffers_dump_string;
-  using boost::movelib::make_unique;
-  using std::vector;
-  using ::capnp::word;
-  using Capnp_word_array_array_ptr = kj::ArrayPtr<const Capnp_word_array_ptr>;
   using Capnp_struct_reader = typename Struct::Reader;
-  using Capnp_heap_engine_opts = ::capnp::ReaderOptions;
 
-  /* When constructing a MessageReader, it takes this ReaderOptions struct which defaults to certain values.
-   * In typical capnp use the user would do this themselves; but in our case we do it for them.
-   * @todo This should be part of our public API throughout (where relevant).  Surely a ticket is filed.  Until then:
-   * The defaults seem fine, except:
-   * The particular traversalLimitInWords option can cause trouble with large structures.  (See capnp source message.h
-   * for its official docs.)  It is a security feature for stuff transmitted over the wire; but as of *this* writing
-   * we do local IPC and explicitly assume trust.  So until this is made configurable (and it really should be)
-   * it's an OK work-around to just shove a giant value here.  Otherwise the mere act of reading a structure with
-   * many sub-structs (in absolute terms, not in terms of depth) can (and has, such as in our test suite's perf_demo)
-   * throw a capnp exception. */
-  constexpr Capnp_heap_engine_opts RDR_OPTIONS = { std::numeric_limits<uint64_t>::max() / sizeof(word),
-                                                   Capnp_heap_engine_opts{}.nestingLimit };
-
-  /* Helper to emit error via usual semantics.  We return a ref so can't use FLOW_ERROR_EXEC_AND_THROW_ON_ERROR().
-   * @todo Wait... we don't return a ref.  Small maintenance mistake?  Fix it up. */
-  const auto emit_error = [&](const Error_code& our_err_code) -> Capnp_struct_reader
-  {
-    if (err_code)
-    {
-      *err_code = our_err_code;
-      return Capnp_struct_reader();
-    }
-    // else
-    throw Runtime_error(our_err_code, "shm::Reader::deserialization()");
-    return Capnp_struct_reader(); // Doesn't get here.
-  };
+  FLOW_ERROR_EXEC_AND_THROW_ON_ERROR(Capnp_struct_reader, deserialization<Struct>, _1);
+  // ^-- Call ourselves and return if err_code is null.  If got to present line, err_code is not null.
 
   // The top serialization is simply this (but what it encodes is a handle to the bottom serialization).
   const auto top_serialization_root
     = m_top_engine.deserialization<schema::detail::ShmTopSerialization>(err_code);
-  // Either that threw (error), set *err_code to truthy (error), or succeeded.  Check for that middle one.
-
   if (*err_code)
   {
     return Capnp_struct_reader();
   }
   // else
 
-  assert((!m_btm_serialization_shm_handle) && "Did you call deserialization() more than once?");
+  assert(m_btm_engine.empty() && "Did you call deserialization() more than once?");
 
-  /* Now get the bottom serialization out of SHM.  To do so, really we mirror what Heap_reader does --
-   * SegmentArrayReader and all that -- but instead of getting it out of direct-serialized stuff from segments in
-   * regular heap, get it out of SHM based on the handle to list<Basic_blob>, where that handle is
-   * the one little thing stored in top_serialization_root. */
+  // Now get the bottom serialization out of SHM.
+  m_btm_engine.borrow(top_serialization_root, m_session, err_code);
+  if (*err_code)
   {
-    // top_serialization_root is a ShmTopSerialization::Reader.
-    const auto capnp_blob_reader = top_serialization_root.getSegmentListInShm();
-    Blob handle_serialization_blob;
-    capnp_get_shm_handle_to_borrow(capnp_blob_reader, &handle_serialization_blob);
-
-    /* And, as documented in the .capnp file -- and can be seen in Builder -- the handle is
-     * to Segments_in_shm, which is the aforementioned list<Basic_blob>.  So interpret it that way
-     * (but read-only: we will never modify it, even if *m_arena is opened for read-write). */
-    m_btm_serialization_shm_handle = m_session->template borrow_object<Segments_in_shm>(handle_serialization_blob);
-  }
-  if (!m_btm_serialization_shm_handle)
-  {
-    return emit_error(error::Code::S_DESERIALIZE_FAILED_SESSION_HOSED);
+    return Capnp_struct_reader();
   }
   // else
+  assert((!m_btm_engine.empty()) && "borrow() should have emitted error then.  Bug in Capnp_message_reader?");
 
-  /* Subtlety: We are about to work with serialization_segments, an STL-compliant structure stored directly in
-   * SHM.  In so doing we'll have to traverse it with iterators and so on.  Needn't we do some kind of
-   * Stateless_allocator/Arena_activator context-setting (e.g., as shm::Capnp_message_builder does when building
-   * up the thing we're now reading)?  If so, we have a problem: what "arena" do we even activate?  Fortunately
-   * (and it's not a fortunate happenstance thing but rather makes sense in terms of the generic asymmetric design
-   * that separates the write-side Arena and the -- in our case -- read Session) we in fact needn't.  This bears
-   * explanation for context:
-   *
-   * Our access to this STL-compliant data structure is read-only.  Our ref is formally to a const
-   * list-of-vectors-of-bytes (note: not a const list-of-POINTERS-to-vectors-of-bytes).  Anything we do will *not*
-   * invoke any <allocator>.<do stuff -- allocate/deallocate()>() calls.  It will certainly access
-   * <allocator>::pointer *type* which will invoke (crucially!) the proper fancy-pointer logic to dereference SHM-stored
-   * (not raw T*) pointers which allows following iterators among other things; but that ::pointer must be able
-   * to generate raw pointers (deref itself) without any context-setting help.  So: we are fine.
-   *
-   * While the following question is not formally relevant to the present code, one might still wonder, so I'll
-   * comment on it: What about the destruction of this data structure down the line, like in our dtor when
-   * we let go of m_btm_serialization_shm_handle?  If that is the last owner process to hold the cross-process
-   * handle to this in-SHM structure, won't "it" need to call its (list-of-vectors or w/e) dtor?  And if so
-   * doesn't "something" need to set the allocator-context before the dtor is called?  Well, firstly, when
-   * the Handle logic, in some process, decides it's time to call the dtor, it is in charge of setting the
-   * allocator-context.  So somehow it must do the right thing.  But for general education, how *does* it do the
-   * right thing?  It's easiest to answer on the level of specific impls.
-   *   - shm::classic::Pool_arena: This simple symmetric core class is both Arena and Session, and both sides
-   *     (in our case the builder and the reader) open the same-named SHM pool in identical ways.
-   *     In its case cross-process ref-count-0 is detected by either process; and whichever one it is
-   *     simply sets itself (Arena::this) as the allocator-context before invoking dtor.  So if it's us, the reader
-   *     process, then it'll do that.  This was ensured when *we* called Session::borrow_object(), which invisibly
-   *     supplied the custom deleter which will in fact do what I just described.  This Session::borrow_object(),
-   *     really, what is it?  It's shm::classic::Pool_arena::borrow_object(), because Session = Pool_arena.
-   *   - SHM-jemalloc provider: This asymmetric setup involves, on the builder side, an Arena and a separate
-   *     Session; and on the reader side a Session that is able to interpret the opposing Session's
-   *     Session::lend_object() in its Session::borrow_object().  The reader-side Session::borrow_object() will set
-   *     up a custom deleter, as it must, and that guy will (internally) IPC-inform the builder side Session that our
-   *     local Handle ref-count=0.  Hence the builder side is in charge of invoking the dtor, when the time comes,
-   *     regardless of which side was last to local ref-count=0.
-   *
-   * Specifics aside, generically speaking: The custom deleter on the Handle is in charge of safely disposing
-   * of the structure when no other holder holds it any longer either -- and it can do it however it needs to.
-   * Part of its charge is to -- when it indeed invokes the STL-compliant structure's dtor -- set the proper
-   * allocator-context to ensure the inner data are disposed of properly first. */
-
-  const Segments_in_shm& serialization_segments = *m_btm_serialization_shm_handle; // Attn: const!
-  // OK!  So now just do the usual SegmentArrayReader stuff as mentioned above (similarly to Heap_reader).
-
-  if (serialization_segments.empty())
-  {
-    FLOW_LOG_WARNING("shm::Reader [" << *this << "]: The top serialization was valid; and the SHM handle "
-                     "therein does point to a list of segments; but that list is empty.  Emitting error.  "
-                     "Other side misbehaved?");
-    return emit_error(struc::error::Code::S_DESERIALIZE_FAILED_INSUFFICIENT_SEGMENTS);
-  }
-  // else
-
-  auto& capnp_segs = m_btm_capnp_segments;
-  assert(capnp_segs.empty());
-  capnp_segs.reserve(serialization_segments.size());
-
-  size_t idx = 0;
-  for (const auto& serialization_segment : serialization_segments) // Reminder: serialization_segment is a Basic_blob.
-  {
-    const uint8_t* data_ptr = &(serialization_segment.front());
-    const size_t seg_size = serialization_segment.size();
-
-    if ((uintptr_t(data_ptr) % sizeof(void*)) != 0)
-    {
-      FLOW_LOG_WARNING("shm::Reader [" << *this << "]: "
-                       "Serialization segment [" << idx << "] "
-                       "(0-based, of [" << serialization_segments.size() << "], 1-based): "
-                       "SHM-heap buffer @[" << static_cast<const void*>(data_ptr) << "] sized [" << seg_size << "]: "
-                       "Starting pointer is not this-architecture-word-aligned.  Bug?  "
-                       "Misuse of Builder?  Other side misbehaved?  "
-                       "Misalignment is against the API use requirements; capnp would complain and fail.");
-      return emit_error(struc::error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED);
-    }
-    // else
-
-    FLOW_LOG_TRACE("shm::Reader [" << *this << "]: "
-                   "Serialization segment [" << idx << "] "
-                   "(0-based, of [" << serialization_segments.size() << "], 1-based): "
-                   "SHM-heap buffer @[" << static_cast<const void*>(data_ptr) << "] sized [" << seg_size << "]: "
-                   "Feeding into capnp deserialization engine.");
-    FLOW_LOG_DATA("Segment contents: "
-                  "[\n" << buffers_dump_string(Blob_const(data_ptr, seg_size), "  ") << "].");
-
-    capnp_segs.emplace_back(reinterpret_cast<const word*>(data_ptr),
-                            seg_size / sizeof(word)); // @todo Maybe also check that seg_size = a multiple?  assert()?
-
-    ++idx;
-  } // for (const auto& serialization_segment : serialization_segments)
-
-  /* Initialize the deserialization engine by giving it the pointers to/size of the backing segment blobs.
-   * It doesn't copy this array of pointers/sizes, so that array must stay alive, hence why capnp_segs is
-   * really m_capnp_segments.  To be clear: not only must the blobs stay alive, but so must the array referring
-   * to them. */
-  const Capnp_word_array_array_ptr capnp_segs_ptr(&(capnp_segs.front()), capnp_segs.size());
-  m_btm_engine = make_unique<Capnp_heap_engine>(capnp_segs_ptr, RDR_OPTIONS);
-
-  assert(((!err_code) || (!*err_code)) && "*err_code should have been cleared above (unless null).");
-
-  // And lastly set up the structured-accessor API object that'll traverse those blobs via that engine.
-  return m_btm_engine->getRoot<Struct>();
+  // .borrow() succeeded, so this will work.
+  return m_btm_engine.template getRoot<Struct>();
 } // Reader::deserialization()
 
 TEMPLATE_SHM_READER

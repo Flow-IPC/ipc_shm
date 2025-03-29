@@ -20,6 +20,8 @@
 
 #include "ipc/shm/classic/classic.hpp"
 #include "ipc/shm/stl/stateless_allocator.hpp"
+#include "ipc/transport/struc/shm/shm_fwd.hpp"
+#include "ipc/transport/transport_fwd.hpp"
 
 namespace ipc::session::shm::classic
 {
@@ -130,6 +132,33 @@ public:
 
   /// Alias for a light-weight blob used in borrow_object() and lend_object().
   using Blob = typename Base::Base::Impl::Blob;
+
+  /**
+   * Server_session::Vat_network and `Client_session::Vat_network` are reasonable concrete types
+   * of template transport::struc::shm::rpc::Session_vat_network for an ipc::session user to use on opposing
+   * sides of a session; use the mainstream-form ctor to straightforwardly construct your zero-copy-enabled
+   * `Vat_network` (from a `*this`) for blazing-fast capnp-RPC.
+   */
+  using Vat_network = transport::struc::shm::rpc::Session_vat_network<Session_mv, Arena>;
+
+  /// You may disregard.
+  using Async_io_obj = transport::Null_peer;
+  /**
+   * Useful for generic programming, the `sync_io`-pattern counterpart to `*this` type.
+   *
+   * @internal
+   * @todo The impl for alias classic::Client_session::Sync_io_obj is hacky and should be reconsidered, even
+   * though in practice it works more or less.  Just `Client_session` is an alias to `Session_mv` parameterized
+   * a certain way, so the alias is defined inside `Session_mv` and is written in terms of `Client_session_adapter`
+   * due to knowing this fact.  Maybe classic::Client_session should be a thin wrapper instead of an alias,
+   * but that's a ton of lines for such a small thing... or maybe some `rebind` craziness would work....
+   */
+  using Sync_io_obj = sync_io::Client_session_adapter<Session_mv>;
+
+  // Constants.
+
+  /// Implements Session API per contract.
+  static constexpr bool S_IS_SRV_ELSE_CLI = Base::S_IS_SRV_ELSE_CLI;
 
   // Constructors/destructor.
 

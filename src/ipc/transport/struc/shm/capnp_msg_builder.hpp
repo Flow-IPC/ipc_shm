@@ -23,7 +23,9 @@
 #include "ipc/shm/stl/arena_activator.hpp"
 #include "ipc/shm/stl/stateless_allocator.hpp"
 #include "ipc/shm/shm.hpp"
+#include "ipc/transport/struc/shm/error.hpp"
 #include "ipc/transport/struc/shm/schema/detail/serialization.capnp.h"
+#include <flow/error/error.hpp>
 #include <boost/interprocess/containers/list.hpp>
 
 namespace ipc::transport::struc::shm
@@ -32,15 +34,16 @@ namespace ipc::transport::struc::shm
 // Types.
 
 /**
- * A `capnp::MessageBuilder` used by shm::Builder: similar to a `MallocMessageBuilder`
+ * A `capnp::MessageBuilder` used by shm::Builder and for general capnp users: similar to a `MallocMessageBuilder`
  * with the `GROW_HEURISTICALLY` alloc-strategy but allocating via a SHM provider (of template-arg-specific
  * type) in SHM instead of the heap via `malloc()`.
  *
- * It can also be used as a #Capnp_msg_builder_interface (`capnp::MessageBuilder`) independently of the rest of
- * ipc::transport::struc or even ::ipc, although that was not the impetus for its development.
+ * It can be used as a #Capnp_msg_builder_interface (`capnp::MessageBuilder`) independently of the rest of
+ * ipc::transport::struc or even ::ipc (excepting the SHM provider supplied as template arg `Shm_arena`).
+ * For example our optional capnp-RPC integration in sub-namespace shm::rpc uses shm::Capnp_message_builder
+ * and Capnp_message_reader in key ways.
  *
- * Its #Segments_in_shm type alias is `public`: shm::Reader must know/understand it in order to be able to
- * interpret the SHM-stored data structure.
+ * @see also Capnp_message_reader.
  *
  * Contrast this with Heap_fixed_builder_capnp_message_builder which allocates in regular heap.
  * The `*this`-user-facing output API -- meaning the thing invoked by struc::Builder::emit_serialization() --
@@ -78,21 +81,13 @@ public:
   using Allocator = ipc::shm::stl::Stateless_allocator<T, Arena>;
 
   /**
-   * For easier outside generic programming, this is the read-only-borrower counterpart to
-   * #Allocator.  See also #Segments_in_shm_borrowed.
-   */
-  template<typename T>
-  using Borrower_allocator
-    = ipc::shm::stl::Stateless_allocator<T, ipc::shm::Arena_to_borrower_allocator_arena_t<Arena>>;
-
-  /**
    * The inner data structure stored in SHM representing one capnp-requested segment storing all or part of
    * the serialization.  `.capacity()` is how much was allocated which is at least what capnp-requested via
    * allocateSegment() `virtual` API we implement.  `.size()` is how many bytes of that were in fact ultimately
    * used by capnp during the *last* serialization as capped by lend().  If `*this` is
    * reused, then capnp may write past `.size()` (but not past `.capacity()`); lend()
    * will then re-correct `.size()` to the true segment size used by capnp as reported by
-   * `this->getSegmentsForOutput()`.
+   * `this->getSegmentsForOutput()`.  Probably not needed (publicly) if one uses a Capnp_message_builder.
    *
    * ### Choice of container type ###
    * In the past this was, first, `std::vector<uint8_t>` (which needed `Default_init_allocator` to avoid
@@ -116,13 +111,8 @@ public:
   using Segment_in_shm = flow::util::Basic_blob<Allocator<uint8_t>>;
 
   /**
-   * For easier outside generic programming, this is the read-only-borrower counterpart to
-   * #Segment_in_shm.  See also #Segments_in_shm_borrowed.
-   */
-  using Segment_in_shm_borrowed = flow::util::Basic_blob<Borrower_allocator<uint8_t>>;
-
-  /**
-   * The outer data structured stored in SHM representing the entire list of capnp-requested segments #Segment_in_shm.
+   * The outer data structure stored in SHM representing the entire list of capnp-requested segments #Segment_in_shm.
+   * Probably not needed (publicly) if one uses a Capnp_message_builder.
    *
    * ### Rationale (`bipc::` vs `std::`) ###
    * Why `bipc::list` and not `std::list`?  Answer:
@@ -135,14 +125,6 @@ public:
    */
   using Segments_in_shm = bipc::list<Segment_in_shm, Allocator<Segment_in_shm>>;
 
-  /**
-   * For easier outside generic programming, this is the read-only-borrower counterpart to
-   * #Segments_in_shm: identical but using #Borrower_allocator instead of #Allocator.
-   * This type shall be used with `borrow_object()` on the deserializing side when decoding
-   * the #Segments_in_shm written by a `*this`.
-   */
-  using Segments_in_shm_borrowed = bipc::list<Segment_in_shm_borrowed, Borrower_allocator<Segment_in_shm_borrowed>>;
-
   // Constructors/destructor.
 
   /**
@@ -153,8 +135,18 @@ public:
    *        Logger to use for logging subsequently.
    * @param arena
    *        See shm::Builder ctor.
+   * @param seg0_sz_words
+   *        For the first backing segment, which is guaranteed to be allocated assuming one ever accesses the root
+   *        via an appopriate #Capnp_msg_builder_interface API, use this exact size (in multiples of
+   *        `sizeof(::capnp::word)`).  If you are able to predict with good certainty a nice tight cap on
+   *        what is needed for this particular message, it may help perf significantly by avoiding the need
+   *        for capnp to ask for another 1+ segments.
+   *        (For spitballing purposes:
+   *        `word` is 8 bytes a/k/a 64 bits as of this writing and is unlikely to ever change.
+   *        The default `SUGGESTED_FIRST_SEGMENT_WORDS` from capnp as of this writing is 1Ki words a/k/a 8Ki bytes).
    */
-  explicit Capnp_message_builder(flow::log::Logger* logger_ptr, Arena* arena);
+  explicit Capnp_message_builder(flow::log::Logger* logger_ptr, Arena* arena,
+                                 size_t seg0_sz_words = ::capnp::SUGGESTED_FIRST_SEGMENT_WORDS);
 
   /// Decrements owner-process count by 1; if current count is 1 deallocates SHM-stored data.
   ~Capnp_message_builder();
@@ -179,16 +171,31 @@ public:
    * Note that as of this writing the direct-use-by-general-user-as-`MessageBuilder` use-case is supported "just
    * because" it can be; nothing in particular needed it.
    *
+   * @tparam Session_t
+   *         Let `S1 = Session_t` and `S2` be the `Session_t` in the opposing Capnp_message_reader::borrow() method.
+   *         Then `S1::lend_object()`, with signature and semantics matching (e.g.) shm::Pool_arena::lend_object()
+   *         must exist; `S2::borrow_object()`, with sig/semantics matching (e.g.) shm::Pool_arena::borrow_object()
+   *         must exist; and those two methods -- and the actual args `shm_session` to our `lend()` and
+   *         to opposing Capnp_message_reader::borrow() -- must interoperate.  In particular here are `S1 + S2`
+   *         pairs that work (this may not be exhaustive).  Caution: Mixing `S1` from one pair with `S2` from another
+   *         is undefined behavior.  (In practice in will work in some cases and will reliably fail in others, even
+   *         when the implied SHM-provider is the same; e.g. session::shm::classic::Client_session + shm::Pool_arena.)
+   *         Here are the aforementioned pairs available out of the box:
+   *         session::shm::classic::Client_session + session::shm::classic::Server_session;
+   *         session::shm::arena_lend::jemalloc::Client_session + session::shm::arena_lend::jemalloc::Server_session;
+   *         shm::Pool_arena + ditto;
+   *         session::shm::arena_lend::jemalloc::Shm_session + ditto.
    * @param capnp_root
    *        The target SHM-handle serialization root to populate as noted above.  Untouched if `false` returned.
    * @param shm_session
-   *        `Shm_session` to the opposing recipient to which we are lending.
+   *        The `.borrow_object()` provider; see `Session_t` doc above.
    * @return `true` on success; `false` if and only if `shm_session->lend_object()` failed (returned empty blob).
    *         Assuming general buglessness of the code up to this point the latter means the session is permanently
    *         down; which is eminently possible in a normally functioning system.
    */
+  template<typename Session_t>
   bool lend(schema::detail::ShmTopSerialization::Builder* capnp_root,
-            session::shm::Arena_to_shm_session_t<Arena>* shm_session);
+            Session_t* shm_session);
 
   /**
    * Implements `MessageBuilder` API.  Invoked by capnp, as the user mutates via `Builder`s.  Do not invoke directly.
@@ -234,22 +241,177 @@ private:
   typename Arena::template Handle<Segments_in_shm> m_serialization_segments;
 }; // class Capnp_message_builder
 
+/**
+ * A `capnp::MessageReader` used by shm::Reader and for general capnp users: able to access capnp-serialized
+ * structure previously created by Capnp_message_builder (a `MessageBuilder` impl).
+ *
+ * It can be used as a #Capnp_msg_reader_interface (`capnp::MessageReader`) independently of the rest of
+ * ipc::transport::struc or even ::ipc (excepting the SHM provider supplied as template arg `Shm_arena`).
+ *
+ * @tparam Shm_arena
+ *         See Capnp_message_reader.
+ */
+template<typename Shm_arena>
+class Capnp_message_reader :
+  public Capnp_msg_reader_interface,
+  public flow::log::Log_context,
+  private boost::noncopyable
+{
+public:
+  // Types.
+
+  /// Short-hand for, you know.
+  using Arena = Shm_arena;
+
+  /**
+   * For easier outside generic programming, this is the read-only-borrower counterpart to
+   * Capnp_message_builder::Allocator.  See also #Segments_in_shm_borrowed.
+   * Might be useful if one does not use a Capnp_message_reader and/or must reimplement (parts of) it for some reason.
+   *
+   * @internal
+   * @todo Use `rebind` in the impl of Capnp_message_reader::Borrower_allocator.
+   */
+  template<typename T>
+  using Borrower_allocator
+    = ipc::shm::stl::Stateless_allocator<T, ipc::shm::Arena_to_borrower_allocator_arena_t<Arena>>;
+
+  /**
+   * For easier outside generic programming, this is the read-only-borrower counterpart to
+   * Capnp_message_builder::Segment_in_shm.  See also #Segments_in_shm_borrowed.
+   * Might be useful if one does not use a Capnp_message_reader and/or must reimplement (parts of) it for some reason.
+   *
+   * @internal
+   * @todo Use `rebind` in the impl of Capnp_message_reader::Segment_in_shm_borrowed.
+   */
+  using Segment_in_shm_borrowed = flow::util::Basic_blob<Borrower_allocator<uint8_t>>;
+
+  /**
+   * For easier outside generic programming, this is the read-only-borrower counterpart to
+   * Capnp_message_builder::Segments_in_shm: identical but using #Borrower_allocator instead of
+   * Capnp_message_builder::Allocator.
+   * This type shall be used with `borrow_object()` on the deserializing side when decoding
+   * the `Segments_in_shm` written by a Capnp_message_builder.
+   * Might be useful if one does not use a Capnp_message_reader and/or must reimplement (parts of) it for some reason.
+   *
+   * @internal
+   * @todo Use `rebind` in the impl of Capnp_message_reader::Segments_in_shm_borrowed.
+   */
+  using Segments_in_shm_borrowed = bipc::list<Segment_in_shm_borrowed, Borrower_allocator<Segment_in_shm_borrowed>>;
+
+  // Constructors/destructor.
+
+  /**
+   * Boring constructor.
+   *
+   * @param logger_ptr
+   *        Logger to use for logging subsequently.
+   */
+  explicit Capnp_message_reader(flow::log::Logger* logger_ptr);
+
+  /**
+   * Any SHM-stored structure currently held as a result of the last successful borrow() is no longer held.  If no other
+   * Capnp_message_builder or Capnp_message_reader (cross-process) holds it, the SHM-stored data are deallocated.
+   */
+  ~Capnp_message_reader();
+
+  // Methods.
+
+  /**
+   * Upon dropping structure loaded by the preceding borrow() call (if any), loads the SHM-stored structure
+   * by interpreting the SHM-handle-encoding provided by the caller.  Assuming success one can then use
+   * the usual techniques of our inherited #Capnp_msg_reader_interface (a/k/a `capnp::MessageReader`) -- most
+   * notably `.getRoot<...>()` -- to access the SHM-stored data.
+   *
+   * @todo Would be nice to provide a more-general counterpart to existing
+   * Capnp_message_reader::borrow() (in addition to that one which interpreats a SHM-handle-endcoding capnp structure),
+   * such as one that takes a mere `Blob`.  The existing one is suitable for the main use-case which is internally by
+   * shm::Reader; but Capnp_message_reader is also usable as a `capnp::MessageReader` directly.  If a user were to
+   * indeed leverage it in that latter capacity, they may want to transmit/store the SHM-handle some other way.
+   *
+   * @tparam Session_t
+   *         See Capnp_message_builder::lend() doc header's note for same-named template parameter.
+   * @param capnp_root
+   *        The SHM-handle serialization root to interpret.
+   *        So if Capnp_message_builder::lend() used the `Builder` to set it, this is the `Reader` counterpart to
+   *        interpret it on the receiving side.
+   * @param shm_session
+   *        The `.borrow_object()` provider; see `Session_t` doc above.
+   * @param err_code
+   *        See `flow::Error_code` docs for error reporting semantics.  #Error_code generated:
+   *        struc::error::Code::S_DESERIALIZE_FAILED_INSUFFICIENT_SEGMENTS (add_serialization_segment() never called;
+   *        or somehow opposing builder serialized an empty segment list -- this would be a bug on their part),
+   *        struc::error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED (add_serialization_segment()-returned segment
+   *        was modified subsequently to start at a misaligned address; or somehow the opposing
+   *        builder supplied a segment that starts at a misaligned address -- this would be a bug on their
+   *        part),
+   *        error::Code::S_DESERIALIZE_FAILED_SESSION_HOSED (the SHM-session was unable to determine the location
+   *        of the serialization in SHM, because its `borrow_object()` method indicated the session is down, or the
+   *        information transmitted over IPC was in some way invalid).
+   */
+  template<typename Session_t>
+  void borrow(const schema::detail::ShmTopSerialization::Reader& capnp_root,
+              Session_t* shm_session, Error_code* err_code = 0);
+
+  /**
+   * Return `false` if and only if borrow() has been invoked at least once, and the last time it was successful.
+   * In other words: whether the `MessageReader` is usable at this time.
+   * @return `false` if `*this` is a usable `MessageReader` at this time; `true` if not.
+   */
+  bool empty() const;
+
+  /**
+   * Implements `MessageReader` API.  Invoked by capnp, as the user accesses `*this` via `Reader`s.
+   *
+   * @note The strange capitalization (that goes against standard Flow-IPC style) is because we are implementing
+   *       a capnp API.
+   *
+   * @param id
+   *        See `MessageReader` API.
+   * @return See `MessageReader` API.
+   */
+  kj::ArrayPtr<const ::capnp::word> getSegment(unsigned int id) override;
+
+private:
+  // Types.
+
+  /// Similar to Heap_reader::Capnp_word_array_ptr.
+  using Capnp_word_array_ptr = kj::ArrayPtr<const ::capnp::word>;
+
+  // Data.
+
+  /**
+   * The outer SHM handle to the #Segments_in_shm_borrowed containing the serialization yielded by e.g.
+   * `this->getRoot<...>()`.  Null until the first successful borrow(),
+   * where it's assigned from `shm_session->borrow_object<T>()`.
+   * In plain(er?) English this a list of blobs, each of which is a capnp segment -- and #m_btm_capnp_segments is a
+   * view into those.
+   */
+  typename Arena::template Handle<Segments_in_shm_borrowed> m_btm_serialization_shm_handle;
+
+  /**
+   * Analogous to Heap_reader::m_capnp_segments; just points into SHM.
+   * It's a view into #m_btm_serialization_shm_handle; or empty if that is null.
+   */
+  std::vector<Capnp_word_array_ptr> m_btm_capnp_segments;
+}; // class Capnp_message_reader
+
 // Free functions: in *_fwd.hpp.
 
 // Template implementations.
 
 template<typename Shm_arena>
 Capnp_message_builder<Shm_arena>::Capnp_message_builder
-  (flow::log::Logger* logger_ptr, Arena* arena) :
+  (flow::log::Logger* logger_ptr, Arena* arena, size_t seg0_sz_words) :
 
   flow::log::Log_context(logger_ptr, Log_component::S_TRANSPORT),
   m_arena(arena),
   // Borrow MallocMessageBuilder's heuristic:
-  m_segment_sz(::capnp::SUGGESTED_FIRST_SEGMENT_WORDS * sizeof(::capnp::word)),
+  m_segment_sz(seg0_sz_words * sizeof(::capnp::word)),
   // Construct the data structure holding the segments, saving a small shared_ptr handle into SHM.
   m_serialization_segments(m_arena->template construct<Segments_in_shm>()) // Can throw.
 {
-  FLOW_LOG_TRACE("SHM builder [" << *this << "]: Created.");
+  FLOW_LOG_TRACE("SHM builder [" << *this << "]: Created; input seg0-size = [" << seg0_sz_words << "] words x "
+                 "[" << sizeof(::capnp::word) << "] bytes/word => next-size=[" << m_segment_sz << "] bytes.");
 }
 
 template<typename Shm_arena>
@@ -261,14 +423,15 @@ Capnp_message_builder<Shm_arena>::~Capnp_message_builder()
 }
 
 template<typename Shm_arena>
-bool Capnp_message_builder<Shm_arena>::lend
-       (schema::detail::ShmTopSerialization::Builder* capnp_root,
-        session::shm::Arena_to_shm_session_t<Arena>* shm_session)
+template<typename Session_t>
+bool Capnp_message_builder<Shm_arena>::lend(schema::detail::ShmTopSerialization::Builder* capnp_root,
+                                            Session_t* shm_session)
 {
   using util::Blob_const;
   using flow::util::buffers_dump_string;
 
   assert(capnp_root);
+  assert(shm_session);
 
   /* Firstly read the paragraph about this method versus
    * Heap_fixed_builder_capnp_message_builder::emit_segment_blobs() (in our class doc header).
@@ -390,7 +553,7 @@ kj::ArrayPtr<::capnp::word>
   using std::memset;
   constexpr size_t WORD_SZ = sizeof(Word);
 
-  /* Background from capnp: They're saying the need the allocated space for serialization to store at least min_sz:
+  /* Background from capnp: They're saying they need the allocated space for serialization to store at least min_sz:
    * probably they're going to store some object that needs at least this much space.  So typically it's some
    * scalar leaf thing, like 4 bytes or whatever; but it could be larger -- or even huge (e.g., a Data or List
    * of huge size, because the user mutated it so via a ::Builder).  Oh, and it has to be zeroed, as by calloc().
@@ -441,7 +604,216 @@ kj::ArrayPtr<::capnp::word>
 } // Capnp_message_builder::allocateSegment()
 
 template<typename Shm_arena>
+Capnp_message_reader<Shm_arena>::Capnp_message_reader(flow::log::Logger* logger_ptr) :
+  /* MessageReader isn't an abstract interface; it takes this ReaderOptions struct which defaults to certain values.
+   * In typical capnp use the user would do this themselves; but in our case we do it for them.
+   * @todo This should be part of our public API throughout (where relevant).  Surely a ticket is filed.  Until then:
+   * The defaults seem fine, except:
+   * The particular traversalLimitInWords option can cause trouble with large structures.  (See capnp source message.h
+   * for its official docs.)  It is a security feature for stuff transmitted over the wire; but as of *this* writing
+   * we do local IPC and explicitly assume trust.  So until this is made configurable (and it really should be)
+   * it's an OK work-around to just shove a giant value here.  Otherwise the mere act of reading a structure with
+   * many sub-structs (in absolute terms, not in terms of depth) can (and has, such as in our test suite's perf_demo)
+   * throw a capnp exception. */
+  Capnp_msg_reader_interface(::capnp::ReaderOptions{ std::numeric_limits<uint64_t>::max() / sizeof(::capnp::word),
+                                                     ::capnp::ReaderOptions{}.nestingLimit }),
+  flow::log::Log_context(logger_ptr, Log_component::S_TRANSPORT)
+{
+  FLOW_LOG_TRACE("SHM reader [" << *this << "]: Created.");
+}
+
+template<typename Shm_arena>
+Capnp_message_reader<Shm_arena>::~Capnp_message_reader()
+{
+  FLOW_LOG_TRACE("SHM reader [" << *this << "]: Destroyed.  The following may SHM-dealloc the serialization.");
+  // m_btm_serialization_shm_handle Handle<> (shared_ptr<>) ref-count will decrement here (possibly to 0).
+}
+
+template<typename Shm_arena>
+template<typename Session_t>
+void Capnp_message_reader<Shm_arena>::borrow
+       (const schema::detail::ShmTopSerialization::Reader& capnp_root,
+        Session_t* shm_session, Error_code* err_code)
+{
+  using Blob = flow::util::Blob_sans_log_context;
+  using ::capnp::word;
+  using util::Blob_const;
+  using flow::util::buffers_dump_string;
+  using std::vector;
+
+  if (flow::error::exec_void_and_throw_on_error
+        ([&](Error_code* actual_err_code) { borrow(capnp_root, shm_session, actual_err_code); },
+         err_code, "Capnp_message_reader::borrow()"))
+  {
+    return;
+  }
+  // else
+
+  assert(shm_session);
+
+  /* This is just to satisfy the contract wherein if we fail, the existing serialization if any
+   * is dropped.  Plus we can log. */
+  if (!empty())
+  {
+    FLOW_LOG_TRACE("SHM reader [" << *this << "]: About to deserialize; hence dropping existing structure.  "
+                   "The following may SHM-dealloc the serialization.");
+    m_btm_capnp_segments.clear();
+    m_btm_serialization_shm_handle.reset(); // Dealloc if any would happen here (ref-count decrement is here).
+  }
+
+  /* Now get the bottom serialization out of SHM.  To do so, really we mirror what Heap_reader does --
+   * a-la SegmentArrayMessageReader -- but instead of getting it out of direct-serialized stuff from segments in
+   * regular heap, get it out of SHM based on the handle to list<Basic_blob>, where that handle is
+   * the one little thing stored in capnp_root. */
+  {
+    // capnp_root is a ShmTopSerialization::Reader.
+    const auto capnp_blob_reader = capnp_root.getSegmentListInShm();
+    Blob handle_serialization_blob;
+    capnp_get_shm_handle_to_borrow(capnp_blob_reader, &handle_serialization_blob);
+
+    /* And, as documented in the .capnp file -- and can be seen in Builder -- the handle is
+     * to Segments_in_shm, which is the aforementioned list<Basic_blob>.  So interpret it that way
+     * (but read-only: we will never modify it). */
+    m_btm_serialization_shm_handle
+      = shm_session->template borrow_object<Segments_in_shm_borrowed>(handle_serialization_blob);
+  }
+  if (!m_btm_serialization_shm_handle)
+  {
+    /* This can surely happen; perhaps we are the first to notice the session being down (or our user has ignored
+     * any earlier sign(s) such as channel/session error handler(s) firing).  It is interesting and should be rare
+     * (not verbose), so a high-severity log message seems worthwhile (even if other similarly-themed messages
+     * might appear nearby). */
+    FLOW_LOG_WARNING("SHM reader [" << *this << "]: "
+                     "After receiving SHM-handle to capnp-serialization in a SHM arena, SHM-session failed "
+                     "to interpret that SHM-handle.  "
+                     "The data structure cannot be accepted from the opposing process.  Assuming no bugs "
+                     "up to this point, the session is down (usually means opposing process is down).");
+    *err_code = error::Code::S_SERIALIZE_FAILED_SESSION_HOSED;
+    return;
+  }
+  // else
+
+  /* Subtlety: We are about to work with serialization_segments, an STL-compliant structure stored directly in
+   * SHM.  In so doing we'll have to traverse it with iterators and so on.  Needn't we do some kind of
+   * Stateless_allocator/Arena_activator context-setting (e.g., as shm::Capnp_message_builder does when building
+   * up the thing we're now reading)?  If so, we have a problem: what "arena" do we even activate?  Fortunately
+   * (and it's not a fortunate happenstance thing but rather makes sense in terms of the generic asymmetric design
+   * that separates the write-side Arena and the -- in our case -- read Session) we in fact needn't.  This bears
+   * explanation for context:
+   *
+   * Our access to this STL-compliant data structure is read-only.  Our ref is formally to a const
+   * list-of-vectors-of-bytes (note: not a const list-of-POINTERS-to-vectors-of-bytes).  Anything we do will *not*
+   * invoke any <allocator>.<do stuff -- allocate/deallocate()>() calls.  It will certainly access
+   * <allocator>::pointer *type* which will invoke (crucially!) the proper fancy-pointer logic to dereference SHM-stored
+   * (not raw T*) pointers which allows following iterators among other things; but that ::pointer must be able
+   * to generate raw pointers (deref itself) without any context-setting help.  So: we are fine.
+   *
+   * While the following question is not formally relevant to the present code, one might still wonder, so I'll
+   * comment on it: What about the destruction of this data structure down the line, like in our dtor when
+   * we let go of m_btm_serialization_shm_handle?  If that is the last owner process to hold the cross-process
+   * handle to this in-SHM structure, won't "it" need to call its (list-of-vectors or w/e) dtor?  And if so
+   * doesn't "something" need to set the allocator-context before the dtor is called?  Well, firstly, when
+   * the Handle logic, in some process, decides it's time to call the dtor, it is in charge of setting the
+   * allocator-context.  So somehow it must do the right thing.  But for general education, how *does* it do the
+   * right thing?  It's easiest to answer on the level of specific impls.
+   *   - shm::classic::Pool_arena: This simple symmetric core class is both Arena and Session, and both sides
+   *     (in our case the builder and the reader) open the same-named SHM pool in identical ways.
+   *     In its case cross-process ref-count-0 is detected by either process; and whichever one it is
+   *     simply sets itself (Arena::this) as the allocator-context before invoking dtor.  So if it's us, the reader
+   *     process, then it'll do that.  This was ensured when *we* called Session::borrow_object(), which invisibly
+   *     supplied the custom deleter which will in fact do what I just described.  This Session::borrow_object(),
+   *     really, what is it?  It's shm::classic::Pool_arena::borrow_object(), because Session = Pool_arena.
+   *   - SHM-jemalloc provider: This asymmetric setup involves, on the builder side, an Arena and a separate
+   *     Session; and on the reader side a Session that is able to interpret the opposing Session's
+   *     Session::lend_object() in its Session::borrow_object().  The reader-side Session::borrow_object() will set
+   *     up a custom deleter, as it must, and that guy will (internally) IPC-inform the builder side Session that our
+   *     local Handle ref-count=0.  Hence the builder side is in charge of invoking the dtor, when the time comes,
+   *     regardless of which side was last to local ref-count=0.
+   *
+   * Specifics aside, generically speaking: The custom deleter on the Handle is in charge of safely disposing
+   * of the structure when no other holder holds it any longer either -- and it can do it however it needs to.
+   * Part of its charge is to -- when it indeed invokes the STL-compliant structure's dtor -- set the proper
+   * allocator-context to ensure the inner data are disposed of properly first. */
+
+  const Segments_in_shm_borrowed& serialization_segments = *m_btm_serialization_shm_handle; // Attn: const!
+  // OK!  So now just do the usual SegmentArrayMessageReader-like stuff as mentioned above (similarly to Heap_reader).
+
+  if (serialization_segments.empty())
+  {
+    FLOW_LOG_WARNING("SHM reader [" << *this << "]: The top serialization was valid; and the SHM handle "
+                     "therein does point to a list of segments; but that list is empty.  Emitting error.  "
+                     "Other side misbehaved?");
+    *err_code = struc::error::Code::S_DESERIALIZE_FAILED_INSUFFICIENT_SEGMENTS;
+    m_btm_serialization_shm_handle.reset();
+    assert(m_btm_capnp_segments.empty() && "We should not have set this up yet.");
+    return;
+  }
+  // else
+
+  auto& capnp_segs = m_btm_capnp_segments;
+  assert(capnp_segs.empty());
+  capnp_segs.reserve(serialization_segments.size());
+
+  size_t idx = 0;
+  for (const auto& serialization_segment : serialization_segments) // Reminder: serialization_segment is a Basic_blob.
+  {
+    const uint8_t* data_ptr = &(serialization_segment.front());
+    const size_t seg_size = serialization_segment.size();
+
+    if ((uintptr_t(data_ptr) % sizeof(void*)) != 0)
+    {
+      FLOW_LOG_WARNING("SHM reader [" << *this << "]: "
+                       "Serialization segment [" << idx << "] "
+                       "(0-based, of [" << serialization_segments.size() << "], 1-based): "
+                       "SHM-heap buffer @[" << static_cast<const void*>(data_ptr) << "] sized [" << seg_size << "]: "
+                       "Starting pointer is not this-architecture-word-aligned.  Bug?  "
+                       "Misuse of Capnp_message_reader?  Other side misbehaved?  "
+                       "Misalignment is against the API use requirements; capnp would complain and fail.");
+      *err_code = struc::error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED;
+      capnp_segs.clear();
+      m_btm_serialization_shm_handle.reset();
+      return;
+    }
+    // else
+
+    FLOW_LOG_TRACE("SHM reader [" << *this << "]: "
+                   "Serialization segment [" << idx << "] "
+                   "(0-based, of [" << serialization_segments.size() << "], 1-based): "
+                   "SHM-heap buffer @[" << static_cast<const void*>(data_ptr) << "] sized [" << seg_size << "]: "
+                   "Feeding into capnp deserialization engine.");
+    FLOW_LOG_DATA("Segment contents: "
+                  "[\n" << buffers_dump_string(Blob_const(data_ptr, seg_size), "  ") << "].");
+
+    capnp_segs.emplace_back(reinterpret_cast<const word*>(data_ptr),
+                            seg_size / sizeof(word)); // @todo Maybe also check that seg_size = a multiple?  assert()?
+
+    ++idx;
+  } // for (const auto& serialization_segment : serialization_segments)
+
+  err_code->clear();
+} // Capnp_message_reader::borrow()
+
+template<typename Shm_arena>
+bool Capnp_message_reader<Shm_arena>::empty() const
+{
+  return !m_btm_serialization_shm_handle;
+}
+
+template<typename Shm_arena>
+kj::ArrayPtr<const ::capnp::word> Capnp_message_reader<Shm_arena>::getSegment(unsigned int id)
+{
+  assert((!empty()) && "Are you trying to access via MessageReader before loading SHM-handle into borrow()?");
+  return (id < m_btm_capnp_segments.size()) ? m_btm_capnp_segments[id] : nullptr;
+}
+
+template<typename Shm_arena>
 std::ostream& operator<<(std::ostream& os, const Capnp_message_builder<Shm_arena>& val)
+{
+  return os << '@' << &val;
+}
+
+template<typename Shm_arena>
+std::ostream& operator<<(std::ostream& os, const Capnp_message_reader<Shm_arena>& val)
 {
   return os << '@' << &val;
 }

@@ -26,7 +26,7 @@ message(STATUS "Dependents shall need to import/link lib: ipc_session.")
 
 set(DEP_IPC_SESSION_VERSION 1.0)
 if(TARGET ipc_session)
-  set(DEP_LIBS ipc_session) # In meta-project mode it's loaded by this short name.
+  set(dep ipc_session) # In meta-project mode it's loaded by this short name.
 
   # In meta-project mode we lack the benefit of find_package(Ipc*) (see the other if() path); which means
   # the transitive dependency -- capnp -- has not been communicated to us.  So we must do it ourselves to
@@ -34,20 +34,23 @@ if(TARGET ipc_session)
   find_package(CapnProto ${CAPNP_VER} CONFIG REQUIRED)
 else()
   find_package(IpcSession ${DEP_IPC_SESSION_VERSION} CONFIG REQUIRED)
-  # In separate-project mode it's been install(EXPORT)ed with the namespace prefix.
-  set(DEP_LIBS IpcSession::ipc_session)
+  set(dep IpcSession::ipc_session) # In separate-project mode it's been install(EXPORT)ed with the namespace prefix.
 endif()
+# Plus we need libcapnp-rpc (also from capnp install) for our capnp-RPC-centered features.
+set(DEP_LIBS ${dep} CapnProto::capnp-rpc)
+unset(dep) # (CMake style: Tried using block() around the above instead... not worth it b/c of find_package() exports.)
 
 # Mirror above find_package() calls.  As directed omit "REQUIRED."
 set(DEP_LIBS_PKG_ARG_LISTS "IpcSession ${DEP_IPC_SESSION_VERSION} CONFIG")
 
-# (See above if wondering why we're not auto-searching for these.  There's a good reason.)
+# (See comment in FlowLikeLib.cmake if wondering why we're not auto-searching for these.  There's a good reason.)
 # Ideally keep this in `find -s` order.
 set(SRCS
     ipc/session/detail/shm/classic/session_shared_name.cpp
     ipc/shm/classic/error.cpp
     ipc/shm/classic/pool_arena.cpp
     ipc/transport/struc/shm/error.cpp
+    ipc/transport/struc/shm/rpc/detail/ez_rpc_kj_io.cpp
     ipc/transport/struc/shm/util.cpp)
 set(CAPNP_SCHEMAS
     ipc/transport/struc/shm/schema/common.capnp
@@ -78,6 +81,12 @@ set(HDRS
     ipc/transport/struc/shm/classic/classic.hpp
     ipc/transport/struc/shm/classic/classic_fwd.hpp
     ipc/transport/struc/shm/error.hpp
+    ipc/transport/struc/shm/rpc/client_context.hpp
+    ipc/transport/struc/shm/rpc/context_server.hpp
+    ipc/transport/struc/shm/rpc/detail/ez_rpc_kj_io.hpp
+    ipc/transport/struc/shm/rpc/ez_rpc.hpp
+    ipc/transport/struc/shm/rpc/server_context.hpp
+    ipc/transport/struc/shm/rpc/session_vat_network.hpp
     ipc/transport/struc/shm/serializer.hpp
     ipc/transport/struc/shm/shm_fwd.hpp
     ${CAPNP_SCHEMAS}) # Export these like any regular headers...

@@ -22,6 +22,7 @@
 #include "ipc/session/shm/classic/server_session.hpp"
 #include "ipc/session/detail/session_server_impl.hpp"
 #include "ipc/transport/struc/schema/common.capnp.h"
+#include "ipc/transport/transport_fwd.hpp"
 #include <boost/move/make_unique.hpp>
 
 namespace ipc::session::shm::classic
@@ -103,6 +104,11 @@ public:
 
   /// Short-hand for shm::classic::Session_mv::Structured_msg_reader_config.
   using Structured_msg_reader_config = typename Server_session_obj::Base::Structured_msg_reader_config;
+
+  /// You may disregard.
+  using Async_io_obj = transport::Null_peer;
+  /// Useful for generic programming, the `sync_io`-pattern counterpart to `*this` type.
+  using Sync_io_obj = sync_io::Session_server_adapter<Session_server>;
 
   // Constructors/destructor.
 

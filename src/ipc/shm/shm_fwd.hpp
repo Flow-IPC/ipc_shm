@@ -75,7 +75,7 @@
  *   - It is not (and would be -- at best -- extremely difficult to become)
  *     integrated with a commercial-grade memory manager, with features such as anti-fragmentation and thread-caching;
  *     hence the allocation/deallocation of objects may be slower compared to heap-based over time.  We rely on
- *     boost.ipcs's algorithm which lacks the maturity of a jemalloc; and while a custom one could surely replace it,
+ *     boost.ipc's algorithm which lacks the maturity of a jemalloc; and while a custom one could surely replace it,
  *     it would be challenging to improve-upon without bringing in a 3rd-party product; such products are not usually
  *     designed around being placed *entirely* into shared memory.
  *   - Two processes (at least) intensively write to the same memory area; this in the presence of
@@ -106,6 +106,7 @@
  *   - Process 1 does not write to (or at least does not allocate in) a pool managed by process 2; and vice versa.
  *     Hence if process X goes down or is ill, the arenas created by the other processes in the system can continue
  *     safely.
+ *
  * The negatives are a large increase in complexity and novelty; and possible risks of sporadically increased latency
  * when SHM-allocating (as, internally, SHM-pool collections must be synchronized across session-connected processes)
  * and during setup (as, during the initial arena-lend one may need to communicate a large built-up SHM-pool
@@ -122,6 +123,7 @@
  *   - With shm::arena_lend: No.  Anything B1 allocates, by definition, must disappear once B1 exits.  The entire
  *     arena disappears by the time B2 appears.  B2 can read anything that *A* allocated including before B2 was
  *     born, because A is alive as is the arena it maintains; but B1 -- no.
+ *
  * In the ipc::session paradigm this type of data is known as *app-scope* in contrast to most data which are
  * *session-scope*.  For data relevant only to each conversation A-B1, A-B2, A-B3, there is no asymmetry: Internally
  * there are 2 arenas in each of the 3 sessions, but conceptually it might as well be a 1 common arena, since both

@@ -308,7 +308,7 @@ typename CLASS_CLSC_SESSION_IMPL::Blob
                                   Blob_const(&scope_id, sizeof(scope_id)));
 
   FLOW_LOG_TRACE("Session [" << *this << "]: SHM-classic-lend serialization: "
-                 "[" << buffers_dump_string(real_serialization.const_buffer(), "  ") << "].");
+                 "[\n" << buffers_dump_string(real_serialization.const_buffer(), "  ") << "].");
 
   return real_serialization;
 } // Session_impl::lend_object()
@@ -322,10 +322,10 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
   using flow::util::buffers_dump_string;
   using Value = T;
 
-  // This should be possible to understand if one has grokked borrow_object().
+  // This should be possible to understand if one has grokked lend_object().
 
   FLOW_LOG_TRACE("Session [" << *this << "]: SHM-classic-borrow serialization: "
-                 "[" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
+                 "[\n" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
 
   Blob real_serialization(serialization); // Copy (it's small).
   const auto real_serialization_sz = real_serialization.size() - sizeof(scope_id_t);

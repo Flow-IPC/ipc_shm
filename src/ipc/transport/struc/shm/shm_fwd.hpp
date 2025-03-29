@@ -19,7 +19,10 @@
 #pragma once
 
 #include "ipc/transport/struc/shm/schema/common.capnp.h"
+#include "ipc/util/native_handle.hpp"
 #include <flow/util/basic_blob.hpp>
+#include <capnp/rpc-twoparty.h>
+#include <capnp/rpc.capnp.h>
 
 // Types.
 
@@ -45,7 +48,7 @@
  * ipc::session::shm::classic::Session_mv::Structured_channel is your guy... no `Builder`s or `Reader`s in sight
  * about which you would need to worry.)
  */
-namespace ipc::transport::struc::shm
+namespace ipc::transport::struc::shm // See also ipc::transport::struc::shm::rpc {} lower down.
 {
 
 // Types.
@@ -62,10 +65,13 @@ class Reader;
 template<typename Shm_arena>
 class Capnp_message_builder;
 
+template<typename Shm_arena>
+class Capnp_message_reader;
+
 // Free functions.
 
 /**
- * Utility that saves the result of a `Shm_session1::lend_object<T>(const shared_ptr<T>&)` result into
+ * Utility that saves the result of a `Shm_session1::lend_object<T>(const shared_ptr<T>&)` into
  * the given capnp-generated `ShmHandle`-typed field.  On the deserializing end, one
  * can get back this value via capnp_get_shm_handle_to_borrow() and pass it to
  * `Shm_session2::borrow_object<T>()` to yield a `shared_ptr<T>` equivalent to the original passed to `lend_object()`.
@@ -143,4 +149,221 @@ std::ostream& operator<<(std::ostream& os, const Reader<Shm_arena>& val);
 template<typename Shm_arena>
 std::ostream& operator<<(std::ostream& os, const Capnp_message_builder<Shm_arena>& val);
 
+/**
+ * Prints string representation of the given `Capnp_message_reader` to the given `ostream`.
+ *
+ * @relatesalso Capnp_message_reader
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+template<typename Shm_arena>
+std::ostream& operator<<(std::ostream& os, const Capnp_message_reader<Shm_arena>& val);
+
 } // namespace ipc::transport::struc::shm
+
+/**
+ * Segregates Flow-IPC's integration with Cap'n Proto's Remote Procedure Call (RPC) layer, wherein one can
+ * perform all the cool, promise-pipelined, interface-and-callback-happy RPC provided by capnp-RPC -- while
+ * enjoying the zero-copy performance provided by Flow-IPC's SHM features.  Naturally this works for IPC-RPC
+ * local to one machine ( as SHM is local to one machine) -- not networked -- but one should be able to
+ * slot-it-in painlessly whenever no network is involved; and revert to normal networked capnp-RPC otherwise;
+ * with only a handful lines of code different between the two.
+ *
+ * Generally speaking, here is how this module relates to a few other key modules:
+ *   - struc::shm::rpc *implements* capnp-RPC interfaces and concepts, so that one can use capnp-RPC as normal --
+ *     but faster (plus some added niceties, namely optional ipc::session support in peer-process discovery
+ *     and session establishment/termination).
+ *   - struc::shm::rpc layer *sits on top of* Flow-IPC's SHM-enabled structured-transport layer,
+ *     ipc::transport::struc::shm.  Notably, to zero-copyify vanilla capnp-RPC, internally it makes use
+ *     of public APIs shm::Capnp_message_builder and shm::Capnp_message_reader (which themselves implement key
+ *     interfaces `capnp::MessageBuilder` and `capnp::MessageReader`, respectively, in capnp's lower serialization
+ *     layer).
+ *   - struc::shm::rpc is an *alternative to* ipc::struc::Channel (+ Msg_out, Msg_in).  The doc header for
+ *     ipc::struc::Channel, at the top, briefly contrasts itself versus us (pros/cons).
+ *
+ * XXX: How to use it!  capnp-RPC brief explainer!  Etc.
+ */
+namespace ipc::transport::struc::shm::rpc
+{
+
+// Types.
+
+// Find doc headers near the bodies of these compound types.
+
+template<typename Shm_lender_borrower_t, typename Shm_arena_t>
+class Session_vat_network;
+
+template<typename Client_session_t>
+class Client_context;
+template<typename Client_session_t>
+class Server_context;
+template<typename Session_server_t>
+class Context_server;
+
+template<typename Client_session_t>
+class Ez_rpc_client;
+template<typename Session_server_t>
+class Ez_rpc_server;
+
+/**
+ * Flow-IPC-styled alias for Session_vat_network and `TwoPartyVatNetwork`'s "connection," which is
+ * an interface for essentially an RPC-oriented stream of capnp messages -- a relatively thin layer on
+ * top of the `capnp::MessageStream` interface.  The latter is a general stream of capnp messages.
+ * Incidentally `capnp::MessageStream` is something like capnp's version of our transport::struc::Channel.
+ *
+ * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
+ * we did with Session_vat_network et al), this might be helpful.
+ */
+using Rpc_conn = capnp::TwoPartyVatNetworkBase::Connection;
+
+/**
+ * Flow-IPC-styled alias for an out-message sent by an #Rpc_conn.
+ *
+ * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
+ * we did with Session_vat_network et al), this might be helpful.
+ */
+using Msg_out = capnp::OutgoingRpcMessage;
+
+/**
+ * Flow-IPC-styled alias for an in-message received by an #Rpc_conn.
+ *
+ * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
+ * we did with Session_vat_network et al), this might be helpful.
+ */
+using Msg_in = capnp::IncomingRpcMessage;
+
+/**
+ * Flow-IPC-styled alias for the node ID in a Session_vat_network or `TwoPartyVatNetwork`: namely an enumeration
+ * containing `SERVER` and `CLIENT`.
+ *
+ * Incidentally we remind you: Much like in ipc::Session the server-vs-client dichotomy carries no meaning, once
+ * a session is established (is in PEER state), similarly by-and-large this ID is just a node ID.  A server
+ * can do client-like things and vice versa... etc.
+ *
+ * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
+ * we did with Session_vat_network et al), this might be helpful.
+ */
+using Vat_id = capnp::rpc::twoparty::VatId;
+
+/// Concrete `capnp::RpcSystem` to be used with Session_vat_network or `TwoPartyVatNetwork`.
+using Rpc_system = capnp::RpcSystem<Vat_id>;
+
+// Free functions.
+
+/**
+ * Potentially useful for the advanced Session_vat_network ctor variant(s), this attempts to remove-from
+ * the given ipc::transport::Channel and return the native handle suitable for Session_vat_network ctor
+ * `bidir_transport` arg.
+ *
+ * The only situation in which it is correct to call this, as of this writing, is before
+ * the plucked-pipe has had any `.start_receive_*_ops()` or `.start_send_*_ops()` methods called on it.
+ * So basically call this only upon successful connection (reaching PEER state) and before any transmission
+ * work whatsoever.
+ *
+ * @tparam Channel_obj
+ *         An instance of ipc::transport::Channel template with Channel::S_IS_SYNC_IO_OBJ equal to `true`.
+ *         Formally at least one of the 2 pipes in this `Channel` type must be capable of bidirectional
+ *         byte-streaming via *one* handle (FD in Unix parlance); and if both pipes are enabled then
+ *         it must be the handles-pipe of the two.  Informally, as of this writing
+ *         (assuming no custom user-supplied transports -- though of course those are allowed formally)
+ *         that is one of: `Socket_stream_channel<true>`, `Socket_stream_channel_of_blobs<true>`,
+ *         `Mqs_socket_stream_channel<true, ...>`.  Informally the chosen pipe shall be based on
+ *         sync_io::Native_socket_stream.
+ * @param channel
+ *        See above.  Reminder: the pipe -- handles-pipe if present, else blobs-pipe -- shall be nullified,
+ *        meaning it shall represent no connection on return of this function, while the returned `Native_handle`
+ *        will contain the handle for the connection that was there at the time of this call.
+ * @return See above.
+ */
+template<typename Channel_obj>
+util::Native_handle pluck_bidir_transport_hndl_from_channel(Channel_obj* channel);
+
+/**
+ * Prints string representation of the given Session_vat_network to the given `ostream`.
+ *
+ * @relatesalso Session_vat_network
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+template<typename Shm_lender_borrower_t, typename Shm_arena_t>
+std::ostream& operator<<(std::ostream& os, const Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>& val);
+
+/**
+ * Prints string representation of the given Client_context to the given `ostream`.
+ *
+ * @relatesalso Client_context
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+template<typename Client_session_t>
+std::ostream& operator<<(std::ostream& os, const Client_context<Client_session_t>& val);
+
+/**
+ * Prints string representation of the given Server_context to the given `ostream`.
+ *
+ * @relatesalso Server_context
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+template<typename Server_session_t>
+std::ostream& operator<<(std::ostream& os, const Server_context<Server_session_t>& val);
+
+/**
+ * Prints string representation of the given Context_server to the given `ostream`.
+ *
+ * @relatesalso Context_server
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+template<typename Session_server_t>
+std::ostream& operator<<(std::ostream& os, const Context_server<Session_server_t>& val);
+
+/**
+ * Prints string representation of the given Ez_rpc_server to the given `ostream`.
+ *
+ * @relatesalso Ez_rpc_server
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+template<typename Session_server_t>
+std::ostream& operator<<(std::ostream& os, const Ez_rpc_server<Session_server_t>& val);
+
+/**
+ * Prints string representation of the given Ez_rpc_client to the given `ostream`.
+ *
+ * @relatesalso Ez_rpc_client
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+template<typename Client_session_t>
+std::ostream& operator<<(std::ostream& os, const Ez_rpc_client<Client_session_t>& val);
+
+} // namespace ipc::transport::struc::shm::rpc
