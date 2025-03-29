@@ -736,6 +736,9 @@ public:
    */
   Msg_out_impl(kj::Own<Msg_out>&& msg, size_t seg0_word_sz, Session_vat_network* daddy);
 
+  /// Boring virtual destructor.
+  ~Msg_out_impl();
+
   // Methods.
 
   /**
@@ -815,6 +818,11 @@ public:
    */
   Msg_in_impl(kj::Own<Msg_in>&& msg, Session_vat_network* daddy);
 
+  /// Boring virtual destructor.
+  ~Msg_in_impl();
+
+  // Methods.
+
   /**
    * Implements #Msg_in API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
    * as opposed to the user.  The odd styling of the name is due to the interface being implemented.
@@ -873,6 +881,9 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::Msg_out_i
 {
   // Cool.
 }
+
+template<typename Shm_lender_borrower_t, typename Shm_arena_t>
+Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::~Msg_out_impl() = default;
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 capnp::AnyPointer::Builder
@@ -1054,6 +1065,9 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl::Msg_in_imp
     }
   } // if (logger_ptr)
 } // Session_vat_network::Msg_in_impl::Msg_in_impl()
+
+template<typename Shm_lender_borrower_t, typename Shm_arena_t>
+Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl::~Msg_in_impl() = default;
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 capnp::AnyPointer::Reader
