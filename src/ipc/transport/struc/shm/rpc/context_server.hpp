@@ -564,7 +564,7 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
                                   (const Client_app& app, size_t n_init_channels_by_cli_req, auto&&) mutable -> size_t
                                     { return n_init_channels_by_srv_req_func(app, n_init_channels_by_cli_req); },
 
-                                [this](auto&&...) {},  // As advertised, cut out the metadata feature.
+                                [](auto&&...) {},  // As advertised, cut out the metadata feature.
 
                                 // The completion handler (*will* execute barring a crash)....
                                 [this,

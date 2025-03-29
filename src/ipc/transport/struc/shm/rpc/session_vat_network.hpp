@@ -22,6 +22,7 @@
 #include "ipc/transport/struc/shm/capnp_msg_builder.hpp"
 #include "ipc/transport/struc/shm/serializer.hpp"
 #include "ipc/transport/struc/util.hpp"
+#include <boost/move/unique_ptr.hpp>
 #include <capnp/any.h>
 #include <flow/log/log.hpp>
 #include <optional>
@@ -391,7 +392,7 @@ public:
                                unsigned int hndl_transport_limit_or_0 = S_N_MAX_INCOMING_FDS);
 
   /// Boring virtual destructor.  It logs.
-  ~Session_vat_network();
+  virtual ~Session_vat_network();
 
   // Methods.
 
@@ -578,8 +579,15 @@ private:
    * native handle/"capability") stream used by #m_network.
    *
    * Null until early in the ctor body; then not null.
+   *
+   * @todo Session_vat_network::m_capnp_msg_stream should be `optional`, and it is fine with at least gcc,
+   * but clang gives an error; so for now made it `unique_ptr`; look into it sometime.  It's not a huge deal
+   * as a `unique_ptr` though.  Presumably it's something inside `BufferedMessageStream` triggering this;
+   * capnp-1.0.2; clang 13, 15, 16, 17; C++17 mode at least.  The error is:
+   * "the parameter for this explicitly-defaulted copy constructor is const, but a member or base requires it
+   * to be non-const" -- refering `optional` copy ctor.
    */
-  std::optional<capnp::BufferedMessageStream> m_capnp_msg_stream;
+  boost::movelib::unique_ptr<capnp::BufferedMessageStream> m_capnp_msg_stream;
 
   /**
    * The Big Kahuna of our impl, this is the `TwoPartyVatNetwork` we reuse to transmit messages back and forth,
@@ -1101,6 +1109,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   using capnp::BufferedMessageStream;
   using capnp::ReaderOptions;
   using kj::newPromiseAndFulfiller;
+  using boost::movelib::make_unique;
 
   assert((bool(m_shm_lnd_brw) == bool(m_shm_arena)) && "Either specify neither or both; just one is weird.");
 
@@ -1177,7 +1186,8 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   if (hndl_transport_limit_or_0 == 0)
   {
     // Create non-FD-passing vanilla AsyncIoStream and use the TwoPartyVatNetwork ctor that takes such accordingly.
-    m_capnp_msg_stream.emplace(*m_kj_stream_of_blobs, std::move(is_short_lived_msg_func));
+    m_capnp_msg_stream = make_unique<BufferedMessageStream>(*m_kj_stream_of_blobs,
+                                                            std::move(is_short_lived_msg_func));
     m_network.emplace(*m_capnp_msg_stream,
                       m_srv_else_cli ? capnp::rpc::twoparty::Side::SERVER
                                      : capnp::rpc::twoparty::Side::CLIENT,
@@ -1187,7 +1197,8 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   {
     /* Create FD-passing AsyncCapabilityStream and use the TwoPartyVatNetwork ctor that takes such (plus in-FD limit)
      * accordingly. */
-    m_capnp_msg_stream.emplace(*m_kj_stream_of_blobs_hndls, std::move(is_short_lived_msg_func));
+    m_capnp_msg_stream = make_unique<BufferedMessageStream>(*m_kj_stream_of_blobs_hndls,
+                                                            std::move(is_short_lived_msg_func));
     m_network.emplace(*m_capnp_msg_stream, hndl_transport_limit_or_0,
                       m_srv_else_cli ? capnp::rpc::twoparty::Side::SERVER
                                      : capnp::rpc::twoparty::Side::CLIENT,
