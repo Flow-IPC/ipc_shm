@@ -737,7 +737,7 @@ public:
   Msg_out_impl(kj::Own<Msg_out>&& msg, size_t seg0_word_sz, Session_vat_network* daddy);
 
   /// Boring virtual destructor.
-  ~Msg_out_impl();
+  virtual ~Msg_out_impl();
 
   // Methods.
 
@@ -819,7 +819,7 @@ public:
   Msg_in_impl(kj::Own<Msg_in>&& msg, Session_vat_network* daddy);
 
   /// Boring virtual destructor.
-  ~Msg_in_impl();
+  virtual ~Msg_in_impl();
 
   // Methods.
 
