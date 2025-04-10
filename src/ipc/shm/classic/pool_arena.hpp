@@ -24,6 +24,8 @@
 #include "ipc/util/detail/util.hpp"
 #include <flow/util/basic_blob.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
+#include <boost/interprocess/indexes/null_index.hpp>
+#include <optional>
 
 namespace ipc::shm::classic
 {
@@ -224,7 +226,7 @@ public:
    */
   explicit Pool_arena(flow::log::Logger* logger_ptr, const Shared_name& pool_name,
                       util::Create_only mode_tag, size_t pool_sz,
-                      const util::Permissions& perms = util::Permissions(), Error_code* err_code = 0);
+                      const util::Permissions& perms = util::Permissions{}, Error_code* err_code = nullptr);
 
   /**
    * Construct Pool_arena accessor object to non-existing named SHM pool, or else if it does not exist creates it
@@ -250,7 +252,7 @@ public:
    */
   explicit Pool_arena(flow::log::Logger* logger_ptr, const Shared_name& pool_name,
                       util::Open_or_create mode_tag, size_t pool_sz,
-                      const util::Permissions& perms_on_create = util::Permissions(), Error_code* err_code = 0);
+                      const util::Permissions& perms_on_create = util::Permissions{}, Error_code* err_code = nullptr);
 
   /**
    * Construct Pool_arena accessor object to existing named SHM pool.  If it does not exist, it is an error.
@@ -280,7 +282,7 @@ public:
    *        various.  Most likely creation failed due to permissions, or it already existed.
    */
   explicit Pool_arena(flow::log::Logger* logger_ptr, const Shared_name& pool_name,
-                      util::Open_only mode_tag, bool read_only = false, Error_code* err_code = 0);
+                      util::Open_only mode_tag, bool read_only = false, Error_code* err_code = nullptr);
 
   /**
    * Destroys Pool_arena accessor object.  In and of itself this does not destroy the underlying pool named
@@ -319,7 +321,7 @@ public:
    *        various.  Most likely it'll be a not-found error or permissions error.
    */
   static void remove_persistent(flow::log::Logger* logger_ptr, const Shared_name& name,
-                                Error_code* err_code = 0);
+                                Error_code* err_code = nullptr);
 
   /**
    * Lists all named SHM pool objects currently persisting, invoking the given handler synchronously on each one.
@@ -495,11 +497,18 @@ private:
 
   /**
    * The SHM pool type one instance of which is managed by `*this`.
-   * It would be possible to parameterize this somewhat, such as specifying different allocation algorithms
+   * It would be possible to parameterize this somewhat further, such as specifying different allocation algorithms
    * or speed up perf in single-thread situations.  See class doc header for discussion.  It is not a formal
    * to-do yet.
+   *
+   * We *do* specify it as `basic_managed_shared_memory` with explicit template-parameters, as opposed to the more
+   * common `managed_shared_memory` alias, as of this writing because we don't need an index (by-name construction
+   * and lookup of objects), so we specify `null_index` to avoid wasting space on it.  (So then we must specify the
+   * other params explicitly.)
    */
-  using Pool = ::ipc::bipc::managed_shared_memory;
+  using Pool = ::ipc::bipc::basic_managed_shared_memory<char,
+                                                        ::ipc::bipc::rbtree_best_fit<::ipc::bipc::mutex_family>,
+                                                        ::ipc::bipc::null_index>;
 
   /**
    * The data structure stored in SHM corresponding to an original construct()-returned #Handle;
@@ -602,7 +611,7 @@ private:
   // Data.
 
   /// Attached SHM pool.  If ctor fails in non-throwing fashion then this remains null.  Immutable after ctor.
-  boost::movelib::unique_ptr<Pool> m_pool;
+  std::optional<Pool> m_pool;
 }; // class Pool_arena
 
 // Free functions: in *_fwd.hpp.
@@ -626,26 +635,26 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
 
   if (!m_pool)
   {
-    return Handle<Value>();
+    return Handle<Value>{};
   }
   // else
 
-  const auto handle_state = static_cast<Shm_handle*>(allocate(sizeof(Value)));
-  // Buffer acquired but uninitialized.  Construct the owner count to 1 (just us).
+  const auto handle_state = static_cast<Shm_handle*>(allocate(sizeof(Shm_handle)));
+  // Buffer acquired but uninitialized.  Construct the owner count to 1 (just us: no lend_object() yet).
   construct_at(&handle_state->m_atomic_owner_ct, 1);
   // Construct the T itself.  As advertised try to help out by setting selves as the current arena.
   {
-    Pool_arena_activator ctx(this);
+    Pool_arena_activator ctx{this};
     construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
   }
 
-  shared_ptr<Shm_handle> real_shm_handle(handle_state, [this](Shm_handle* handle_state)
+  shared_ptr<Shm_handle> real_shm_handle{handle_state, [this](Shm_handle* handle_state)
   {
     handle_deleter_impl<Value>(handle_state);
-  }); // Custom deleter.
+  }}; // Custom deleter.
 
   // Return alias shared_ptr whose .get() gives &m_obj but in reality aliases to real_shm_handle.
-  return Handle<Value>(std::move(real_shm_handle), &handle_state->m_obj);
+  return Handle<Value>{std::move(real_shm_handle), &handle_state->m_obj};
 } // Pool_arena::construct()
 
 template<typename T>
@@ -658,7 +667,7 @@ Pool_arena::Blob Pool_arena::lend_object(const Handle<T>& handle)
 
   if (!m_pool)
   {
-    return Blob();
+    return Blob{};
   }
   // else
 
@@ -668,7 +677,7 @@ Pool_arena::Blob Pool_arena::lend_object(const Handle<T>& handle)
   const ptrdiff_t offset_from_pool_base = reinterpret_cast<const uint8_t*>(handle_state)
                                           - static_cast<const uint8_t*>(m_pool->get_address());
 
-  Blob serialization(sizeof(offset_from_pool_base));
+  Blob serialization{sizeof(offset_from_pool_base)};
   *(reinterpret_cast<ptrdiff_t*>(serialization.data())) = offset_from_pool_base;
 
   FLOW_LOG_TRACE("SHM-classic pool [" << *this << "]: Serializing SHM outer handle [" << handle << "] before "
@@ -690,7 +699,7 @@ Pool_arena::Handle<T> Pool_arena::borrow_object(const Blob& serialization)
 
   if (!m_pool)
   {
-    return Handle<Value>();
+    return Handle<Value>{};
   }
   // else
 
@@ -706,10 +715,10 @@ Pool_arena::Handle<T> Pool_arena::borrow_object(const Blob& serialization)
 
   // Now simply do just as in construct():
 
-  shared_ptr<Shm_handle> real_shm_handle(handle_state, [this](Shm_handle* handle_state)
+  shared_ptr<Shm_handle> real_shm_handle{handle_state, [this](Shm_handle* handle_state)
   {
     handle_deleter_impl<Value>(handle_state);
-  });
+  }};
 
   FLOW_LOG_TRACE("SHM-classic pool [" << *this << "]: Deserialized SHM outer handle [" << real_shm_handle << "] "
                  "(type [" << typeid(Value).name() << "]) "
@@ -718,7 +727,7 @@ Pool_arena::Handle<T> Pool_arena::borrow_object(const Blob& serialization)
                  "Handle points to SHM-offset [" << offset_from_pool_base << "] (deserialized).  Serialized "
                  "contents are [" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
 
-  return Handle<Value>(std::move(real_shm_handle), &handle_state->m_obj);
+  return Handle<Value>{std::move(real_shm_handle), &handle_state->m_obj};
 } // Pool_arena::borrow_object()
 
 template<typename T>
@@ -743,7 +752,7 @@ void Pool_arena::handle_deleter_impl(Handle_in_shm<T>* handle_state)
       /* As promised, and rather crucically, help out by setting this context (same as we had around ctor --
        * but this time it's more essential, since they can pretty easily do it themselves when constructing; but
        * doing it at the time of reaching shared_ptr ref-count=0... that's a tall order). */
-      Pool_arena_activator ctx(this);
+      Pool_arena_activator ctx{this};
 
       // But regardless:
       (handle_state->m_obj).~Value();

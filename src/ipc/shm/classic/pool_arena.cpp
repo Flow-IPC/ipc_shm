@@ -20,8 +20,6 @@
 #include "ipc/shm/classic/pool_arena.hpp"
 #include "ipc/shm/classic/error.hpp"
 #include "ipc/util/detail/util.hpp"
-#include "ipc/util/detail/util_fwd.hpp"
-#include <boost/move/make_unique.hpp>
 
 namespace ipc::shm::classic
 {
@@ -30,11 +28,10 @@ template<typename Mode_tag>
 Pool_arena::Pool_arena(Mode_tag mode_tag, flow::log::Logger* logger_ptr,
                        const Shared_name& pool_name_arg, size_t pool_sz,
                        const util::Permissions& perms, Error_code* err_code) :
-  flow::log::Log_context(logger_ptr, Log_component::S_TRANSPORT),
+  flow::log::Log_context(logger_ptr, Log_component::S_SHM),
   m_pool_name(pool_name_arg)
 {
   using boost::io::ios_all_saver;
-  using boost::movelib::make_unique;
 
   assert(pool_sz >= sizeof(void*));
   static_assert(std::is_same_v<Mode_tag, util::Create_only> || std::is_same_v<Mode_tag, util::Open_or_create>,
@@ -44,7 +41,7 @@ Pool_arena::Pool_arena(Mode_tag mode_tag, flow::log::Logger* logger_ptr,
 
   if (get_logger()->should_log(flow::log::Sev::S_INFO, get_log_component()))
   {
-    ios_all_saver saver(*(get_logger()->this_thread_ostream())); // Revert std::oct/etc. soon.
+    ios_all_saver saver{*(get_logger()->this_thread_ostream())}; // Revert std::oct/etc. soon.
     FLOW_LOG_INFO_WITHOUT_CHECKING
       ("SHM-classic pool [" << *this << "]: Constructing heap handle to heap/pool at name [" << m_pool_name << "] in "
        "[" << MODE_STR << "] mode; pool size [" << flow::util::ceil_div(pool_sz, size_t(1024 * 1024)) << "Mi]; "
@@ -56,7 +53,7 @@ Pool_arena::Pool_arena(Mode_tag mode_tag, flow::log::Logger* logger_ptr,
   util::op_with_possible_bipc_exception
     (get_logger(), err_code, error::Code::S_SHM_BIPC_MISC_LIBRARY_ERROR, "Pool_arena(): Pool()", [&]()
   {
-    m_pool = make_unique<Pool>(mode_tag, m_pool_name.native_str(), pool_sz, nullptr, perms);
+    m_pool.emplace(mode_tag, m_pool_name.native_str(), pool_sz, nullptr, perms);
   });
 } // Pool_arena::Pool_arena()
 
@@ -81,16 +78,20 @@ Pool_arena::Pool_arena(flow::log::Logger* logger_ptr,
   flow::log::Log_context(logger_ptr, Log_component::S_TRANSPORT),
   m_pool_name(pool_name_arg)
 {
-  using boost::movelib::make_unique;
-
   FLOW_LOG_INFO("SHM-classic pool [" << *this << "]: Constructing heap handle to heap/pool at name "
                 "[" << m_pool_name << "] in open-only mode; paged read-only? = [" << read_only << "].");
 
   util::op_with_possible_bipc_exception(get_logger(), err_code, error::Code::S_SHM_BIPC_MISC_LIBRARY_ERROR,
                                         "Pool_arena(OPEN_ONLY): Pool()", [&]()
   {
-    m_pool = read_only ? make_unique<Pool>(::ipc::bipc::open_read_only, m_pool_name.native_str())
-                       : make_unique<Pool>(util::OPEN_ONLY, m_pool_name.native_str());
+    if (read_only)
+    {
+      m_pool.emplace(::ipc::bipc::open_read_only, m_pool_name.native_str());
+    }
+    else
+    {
+      m_pool.emplace(util::OPEN_ONLY, m_pool_name.native_str());
+    }
   });
 } // Pool_arena::Pool_arena()
 
