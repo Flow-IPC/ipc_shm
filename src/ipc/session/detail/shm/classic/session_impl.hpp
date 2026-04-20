@@ -328,6 +328,20 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
                  "[" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
 
   Blob real_serialization(serialization); // Copy (it's small).
+
+  if (serialization.size() < sizeof(scope_id_t))
+  {
+    /* For safety let's do real runtime check rather than a mere (often skipped in release builds) assert().
+     * This is akin to how Pool_arena::borrow_object() (called below) would act if it's able to detect
+     * a bogus real_serialization. */
+    FLOW_LOG_WARNING("Session [" << *this << "]: SHM-classic-borrow serialization "
+                     "has incorrect size [" << serialization.size() << "] in that it cannot hold "
+                     "the Session-generated scope ID (size [" << sizeof(scope_id_t) << "]).  Borrow op fails.  "
+                     "Was there a bug in transmitting the blob returned by opposing lend_object()?");
+    return nullptr;
+  }
+  // else
+
   const auto real_serialization_sz = real_serialization.size() - sizeof(scope_id_t);
   real_serialization.start_past_prefix_inc(real_serialization_sz);
   // Copy it out of there (that should realign it at the target stack location).
