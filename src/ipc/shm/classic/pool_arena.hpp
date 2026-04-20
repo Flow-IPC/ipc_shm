@@ -778,7 +778,7 @@ Pool_arena::Handle<T> Pool_arena::borrow_object(const Blob& serialization)
                      "Was there a bug in transmitting the blob returned by opposing lend_object()?");
     return Handle<Value>{};
   }
-  // else:
+  // else
 
   FLOW_LOG_TRACE("SHM-classic pool [" << *this << "]: Deserialized SHM outer handle "
                  "[" << static_cast<const void*>(handle_state) << "] "
