@@ -162,6 +162,13 @@ bool Pool_arena::deallocate(void* buf_not_null) noexcept
   return true;
 } // Pool_arena::deallocate()
 
+bool Pool_arena::is_addr_in_arena(const void* p) const
+{
+  // Pre-requisite to this internal helper is: m_pool is non-null.
+  const auto pool_base = static_cast<const uint8_t*>(m_pool->get_address());
+  return (p >= pool_base) && (p < (pool_base + m_pool->get_size()));
+}
+
 void Pool_arena::remove_persistent(flow::log::Logger* logger_ptr, // Static.
                                    const Shared_name& pool_name, Error_code* err_code)
 {

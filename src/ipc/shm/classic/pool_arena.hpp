@@ -449,7 +449,8 @@ public:
 
   /**
    * Completes the cross-process operation begun by lend_object() that returned `serialization`; to be invoked in the
-   * intended new owner process.  Returns null if no pool attached to `*this`.
+   * intended new owner process.  Returns null if no pool attached to `*this`, or if we detect `serialization`
+   * to be invalid (best-effort check).
    *
    * Consider the only 2 ways a user may obtain a new #Handle to a `T` from `*this`:
    *   - construct(): This is allocation by the original/first owner of the `T`.
@@ -468,7 +469,8 @@ public:
    *         See lend_object().
    * @param serialization
    *        Value, not `.empty()`, returned by lend_object() and transmitted bit-for-bit to this process.
-   * @return Non-null on success; `null` if ctor failed to attach a pool.
+   * @return Non-null on success; `null` if ctor failed to attach a pool, or if `serialization` is invalid
+   *         (best-effort check).
    */
   template<typename T>
   Handle<T> borrow_object(const Blob& serialization);
@@ -481,8 +483,8 @@ public:
    *
    * @param handle
    *        An object, or copy/move of an object, returned by `construct<T>()` or `borrow_object<T>()`
-   *        of *a* Pool_arena (not necessarily `*this`), while `*this` was already constructed.
-   * @return See above.
+   *        of *a* Pool_arena (not necessarily `*this`).
+   * @return See above.  (Corner case: If ctor failed to attach a pool, we return `false`.)
    */
   template<typename T>
   bool is_handle_in_arena(const Handle<T>& handle) const;
@@ -608,6 +610,32 @@ private:
   template<typename T>
   void handle_deleter_impl(Handle_in_shm<T>* handle_state);
 
+  /**
+   * Returns `true` if and only if the byte at `p` is within the bounds of the pool accessed by `*this`.
+   *
+   * Assumes #m_pool is non-null; else undefined behavior.
+   *
+   * @param p
+   *        An address.
+   * @return See above.
+   */
+  bool is_addr_in_arena(const void* p) const;
+
+  /**
+   * Returns `true` if and only if all `sizeof(T)` bytes at address `obj` are within the bounds of the pool
+   * accessed by `*this`.
+   *
+   * Assumes #m_pool is non-null; else undefined behavior.
+   *
+   * @tparam T
+   *         Object type; `sizeof(T)` is significant in the calculation, so this is not mere syntactic sugar.
+   * @param obj
+   *        An address.
+   * @return See above.
+   */
+  template<typename T>
+  bool is_obj_in_arena(const T* obj) const;
+
   // Data.
 
   /// Attached SHM pool.  If ctor fails in non-throwing fashion then this remains null.  Immutable after ctor.
@@ -621,9 +649,26 @@ private:
 template<typename T>
 bool Pool_arena::is_handle_in_arena(const Handle<T>& handle) const
 {
-  const auto p = reinterpret_cast<const uint8_t*>(handle.get());
-  const auto pool_base = static_cast<const uint8_t*>(m_pool->get_address());
-  return (p >= pool_base) && (p < (pool_base + m_pool->get_size()));
+  /* Subtlety: This (public) method is not intended as a legitness check of `handle` but rather to indicate whether
+   * the assumed-legit `handle` coming from *a* Pool_arena came from the pool (if any) to which *this refers. */
+  return m_pool // Else couldn't open any pool in ctor.
+         && is_addr_in_arena(static_cast<const void*>(handle.get()));
+}
+
+template<typename T>
+bool Pool_arena::is_obj_in_arena(const T* obj) const
+{
+  // Pre-requisite to this internal helper is: m_pool is non-null.
+
+  if (!is_addr_in_arena(static_cast<const void*>(obj)))
+  {
+    return false;
+  }
+  // else: First byte of obj is in range; hence ensure its last byte isn't past range's last byte.
+
+  return (reinterpret_cast<const uint8_t*>(obj) + sizeof(T))
+         <= (static_cast<const uint8_t*>(m_pool->get_address())
+             + m_pool->get_size());
 }
 
 template<typename T, typename... Ctor_args>
@@ -648,13 +693,11 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
     construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
   }
 
-  shared_ptr<Shm_handle> real_shm_handle{handle_state, [this](Shm_handle* handle_state)
-  {
-    handle_deleter_impl<Value>(handle_state);
-  }}; // Custom deleter.
-
-  // Return alias shared_ptr whose .get() gives &m_obj but in reality aliases to real_shm_handle.
-  return Handle<Value>{std::move(real_shm_handle), &handle_state->m_obj};
+  // Return alias shared_ptr whose .get() gives &m_obj but in reality aliases to the shared_ptr<Shm_handle>.
+  return Handle<Value>{shared_ptr<Shm_handle>{handle_state,
+                                              [this](Shm_handle* handle_state)
+                                                { handle_deleter_impl<Value>(handle_state); }}, // Custom deleter.
+                       &handle_state->m_obj};
 } // Pool_arena::construct()
 
 template<typename T>
@@ -704,8 +747,17 @@ Pool_arena::Handle<T> Pool_arena::borrow_object(const Blob& serialization)
   // else
 
   ptrdiff_t offset_from_pool_base;
-  assert((serialization.size() == sizeof(offset_from_pool_base))
-         && "lend_object() and borrow_object() incompatible?  Bug?");
+  if (serialization.size() != sizeof(offset_from_pool_base))
+  {
+    // For safety let's do real runtime check rather than a mere (often skipped in release builds) assert().
+    FLOW_LOG_WARNING("SHM-classic pool [" << *this << "]: In attempt to deserialize SHM outer handle "
+                     "(type [" << typeid(Value).name() << "]) "
+                     "after IPC-receipt detected incorrect size [" << serialization.size() << "] of the serialized "
+                     "SHM-handle blob (expected: [" << sizeof(offset_from_pool_base) << "]).  Borrow op fails.  "
+                     "Was there a bug in transmitting the blob returned by opposing lend_object()?");
+    return Handle<Value>{};
+  }
+  // else
 
   offset_from_pool_base = *(reinterpret_cast<decltype(offset_from_pool_base) const *>
                               (serialization.const_data()));
@@ -713,21 +765,35 @@ Pool_arena::Handle<T> Pool_arena::borrow_object(const Blob& serialization)
     = reinterpret_cast<Shm_handle*>
         (static_cast<uint8_t*>(m_pool->get_address()) + offset_from_pool_base);
 
-  // Now simply do just as in construct():
-
-  shared_ptr<Shm_handle> real_shm_handle{handle_state, [this](Shm_handle* handle_state)
+  /* Reminder: Shm_handle=Handle_in_shm<Value> -- our *handle_state in particular -- includes both the `Value` and
+   * the metadata (m_atomic_owner_ct as of this writing).  Hence this is a good safety check: */
+  if (!is_obj_in_arena(handle_state))
   {
-    handle_deleter_impl<Value>(handle_state);
-  }};
+    // Again: For safety let's log and abort rather than a mere (often skipped in release builds) assert().
+    FLOW_LOG_WARNING("SHM-classic pool [" << *this << "]: In attempt to deserialize SHM outer handle "
+                     "[" << static_cast<const void*>(handle_state) << "] "
+                     "(value+metadata size [" << sizeof(Shm_handle) << "], type [" << typeid(Value).name() << "]) "
+                     "after IPC-receipt detected that the value+metadata buffer is not wholly contained in "
+                     "our pool.  Borrow op fails.  "
+                     "Was there a bug in transmitting the blob returned by opposing lend_object()?");
+    return Handle<Value>{};
+  }
+  // else:
 
-  FLOW_LOG_TRACE("SHM-classic pool [" << *this << "]: Deserialized SHM outer handle [" << real_shm_handle << "] "
-                 "(type [" << typeid(Value).name() << "]) "
-                 "after IPC-receipt: Owner-count is at [" << handle_state->m_atomic_owner_ct << "] "
+  FLOW_LOG_TRACE("SHM-classic pool [" << *this << "]: Deserialized SHM outer handle "
+                 "[" << static_cast<const void*>(handle_state) << "] "
+                 "(type [" << typeid(Value).name() << "]) after IPC-receipt: "
+                 "Owner-count is at [" << handle_state->m_atomic_owner_ct << "] "
                  "(may change concurrently; but includes us at least hence must be 1+).  "
                  "Handle points to SHM-offset [" << offset_from_pool_base << "] (deserialized).  Serialized "
                  "contents are [" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
 
-  return Handle<Value>{std::move(real_shm_handle), &handle_state->m_obj};
+  // Now simply do just as in construct():
+
+  return Handle<Value>{shared_ptr<Shm_handle>{handle_state,
+                                              [this](Shm_handle* handle_state)
+                                                { handle_deleter_impl<Value>(handle_state); }},
+                       &handle_state->m_obj};
 } // Pool_arena::borrow_object()
 
 template<typename T>
