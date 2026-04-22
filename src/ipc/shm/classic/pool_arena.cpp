@@ -165,8 +165,13 @@ bool Pool_arena::deallocate(void* buf_not_null) noexcept
 bool Pool_arena::is_addr_in_arena(const void* p) const
 {
   // Pre-requisite to this internal helper is: m_pool is non-null.
-  const auto pool_base = static_cast<const uint8_t*>(m_pool->get_address());
-  return (p >= pool_base) && (p < (pool_base + m_pool->get_size()));
+
+  /* Let's use pure integer arithmetic to avoid a genius optimizer detecting formal undefined-behavior
+   * (pointers outside data structures) and generating surprising results. */
+  const auto addr = reinterpret_cast<uintptr_t>(p);
+  const auto pool_base = reinterpret_cast<uintptr_t>(m_pool->get_address());
+  // Sidestep any (albeit very unlikely) wrap.
+  return (addr >= pool_base) && ((addr - pool_base) < m_pool->get_size());
 }
 
 void Pool_arena::remove_persistent(flow::log::Logger* logger_ptr, // Static.

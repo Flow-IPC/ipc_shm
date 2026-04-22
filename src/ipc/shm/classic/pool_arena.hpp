@@ -25,6 +25,7 @@
 #include <flow/util/basic_blob.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 #include <boost/interprocess/indexes/null_index.hpp>
+#include <cstring>
 #include <optional>
 
 namespace ipc::shm::classic
@@ -666,9 +667,11 @@ bool Pool_arena::is_obj_in_arena(const T* obj) const
   }
   // else: First byte of obj is in range; hence ensure its last byte isn't past range's last byte.
 
-  return (reinterpret_cast<const uint8_t*>(obj) + sizeof(T))
-         <= (static_cast<const uint8_t*>(m_pool->get_address())
-             + m_pool->get_size());
+  /* The arithmetic and casts probably look odd, but it's the same reasoning as in is_addr_in_arena();
+   * use integer arithmetic only and avoid wraps via + while using known-non-negative-result subtractions. */
+  return sizeof(T)
+         <= (m_pool->get_size() - (reinterpret_cast<uintptr_t>(obj)
+                                   - reinterpret_cast<uintptr_t>(m_pool->get_address())));
 }
 
 template<typename T, typename... Ctor_args>
@@ -717,8 +720,8 @@ Pool_arena::Blob Pool_arena::lend_object(const Handle<T>& handle)
   const auto handle_state = reinterpret_cast<Shm_handle*>(handle.get());
   const auto new_owner_ct = ++handle_state->m_atomic_owner_ct;
 
-  const ptrdiff_t offset_from_pool_base = reinterpret_cast<const uint8_t*>(handle_state)
-                                          - static_cast<const uint8_t*>(m_pool->get_address());
+  const ptrdiff_t offset_from_pool_base = reinterpret_cast<uintptr_t>(handle_state)
+                                          - reinterpret_cast<uintptr_t>(m_pool->get_address());
 
   Blob serialization{sizeof(offset_from_pool_base)};
   *(reinterpret_cast<ptrdiff_t*>(serialization.data())) = offset_from_pool_base;
@@ -739,6 +742,7 @@ Pool_arena::Handle<T> Pool_arena::borrow_object(const Blob& serialization)
   using Shm_handle = Handle_in_shm<Value>;
   using flow::util::buffers_dump_string;
   using boost::shared_ptr;
+  using std::memcpy;
 
   if (!m_pool)
   {
@@ -759,11 +763,14 @@ Pool_arena::Handle<T> Pool_arena::borrow_object(const Blob& serialization)
   }
   // else
 
-  offset_from_pool_base = *(reinterpret_cast<decltype(offset_from_pool_base) const *>
-                              (serialization.const_data()));
+  /* memcpy() it out of there: the source address may not be aligned.  (In many APIs such things are assumed as a
+   * matter of course, but as `serialization` may be IPCed-over to us via any technique, we're being
+   * extra defensive.) */
+  memcpy(&offset_from_pool_base, serialization.const_data(), sizeof(offset_from_pool_base));
+
   const auto handle_state
     = reinterpret_cast<Shm_handle*>
-        (static_cast<uint8_t*>(m_pool->get_address()) + offset_from_pool_base);
+        (reinterpret_cast<uintptr_t>(m_pool->get_address()) + offset_from_pool_base);
 
   /* Reminder: Shm_handle=Handle_in_shm<Value> -- our *handle_state in particular -- includes both the `Value` and
    * the metadata (m_atomic_owner_ct as of this writing).  Hence this is a good safety check: */
