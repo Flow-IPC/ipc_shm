@@ -370,7 +370,7 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
   // else
 
   FLOW_LOG_WARNING("Session [" << *this << "]: SHM-classic-borrow serialization "
-                   "has correct size, but invalid scope ID [" << scope_id << "].  Borrow op fails.  "
+                   "has correct size but invalid scope ID [" << scope_id << "].  Borrow op fails.  "
                    "Was there a bug in transmitting the blob returned by opposing lend_object()?");
   return nullptr;
 } // Session_impl::borrow_object()
