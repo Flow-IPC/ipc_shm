@@ -369,7 +369,9 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
   }
   // else
 
-  assert(false && "borrow_object() called on invalid value?  Or bug -- forgot to update this method?  IPC fail?");
+  FLOW_LOG_WARNING("Session [" << *this << "]: SHM-classic-borrow serialization "
+                   "has correct size, but invalid scope ID [" << scope_id << "].  Borrow op fails.  "
+                   "Was there a bug in transmitting the blob returned by opposing lend_object()?");
   return nullptr;
 } // Session_impl::borrow_object()
 
