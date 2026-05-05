@@ -39,9 +39,9 @@ Pool_arena::Pool_arena(Mode_tag mode_tag, flow::log::Logger* logger_ptr,
   constexpr char const * MODE_STR = std::is_same_v<Mode_tag, util::Create_only>
                                       ? "create-only" : "open-or-create";
 
-  if (get_logger()->should_log(flow::log::Sev::S_INFO, get_log_component()))
+  if (logger_ptr && logger_ptr->should_log(flow::log::Sev::S_INFO, get_log_component()))
   {
-    ios_all_saver saver{*(get_logger()->this_thread_ostream())}; // Revert std::oct/etc. soon.
+    ios_all_saver saver{*(logger_ptr->this_thread_ostream())}; // Revert std::oct/etc. soon.
     FLOW_LOG_INFO_WITHOUT_CHECKING
       ("SHM-classic pool [" << *this << "]: Constructing heap handle to heap/pool at name [" << m_pool_name << "] in "
        "[" << MODE_STR << "] mode; pool size [" << flow::util::ceil_div(pool_sz, size_t(1024 * 1024)) << "Mi]; "
@@ -110,7 +110,8 @@ void* Pool_arena::allocate(size_t n)
   }
   // else
 
-  if (get_logger()->should_log(flow::log::Sev::S_DATA, get_log_component()))
+  const auto logger_ptr = get_logger();
+  if (logger_ptr && logger_ptr->should_log(flow::log::Sev::S_DATA, get_log_component()))
   {
     const auto total = m_pool->get_size();
     const auto prev_free = m_pool->get_free_memory();
@@ -140,7 +141,8 @@ bool Pool_arena::deallocate(void* buf_not_null) noexcept
   }
   // else
 
-  if (get_logger()->should_log(flow::log::Sev::S_DATA, get_log_component()))
+  const auto logger_ptr = get_logger();
+  if (logger_ptr && logger_ptr->should_log(flow::log::Sev::S_DATA, get_log_component()))
   {
     const auto total = m_pool->get_size();
     const auto prev_free = m_pool->get_free_memory();
@@ -161,6 +163,18 @@ bool Pool_arena::deallocate(void* buf_not_null) noexcept
 
   return true;
 } // Pool_arena::deallocate()
+
+bool Pool_arena::is_addr_in_arena(const void* p) const
+{
+  // Pre-requisite to this internal helper is: m_pool is non-null.
+
+  /* Let's use pure integer arithmetic to avoid a genius optimizer detecting formal undefined-behavior
+   * (pointers outside data structures) and generating surprising results. */
+  const auto addr = reinterpret_cast<uintptr_t>(p);
+  const auto pool_base = reinterpret_cast<uintptr_t>(m_pool->get_address());
+  // Sidestep any (albeit very unlikely) wrap.
+  return (addr >= pool_base) && ((addr - pool_base) < m_pool->get_size());
+}
 
 void Pool_arena::remove_persistent(flow::log::Logger* logger_ptr, // Static.
                                    const Shared_name& pool_name, Error_code* err_code)

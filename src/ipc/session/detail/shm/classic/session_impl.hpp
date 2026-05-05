@@ -23,6 +23,7 @@
 #include "ipc/session/shm/classic/classic.hpp"
 #include "ipc/transport/struc/shm/classic/classic_fwd.hpp"
 #include "ipc/transport/struc/shm/classic/classic.hpp"
+#include <cstring>
 
 namespace ipc::session::shm::classic
 {
@@ -320,18 +321,39 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
 {
   using util::Blob_const;
   using flow::util::buffers_dump_string;
+  using std::memcpy;
   using Value = T;
+  constexpr auto SCOPE_ID_SZ = sizeof(scope_id_t);
 
-  // This should be possible to understand if one has grokked borrow_object().
+  // This should be possible to understand if one has grokked lend_object().
 
   FLOW_LOG_TRACE("Session [" << *this << "]: SHM-classic-borrow serialization: "
                  "[" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
 
+  if (serialization.size() < SCOPE_ID_SZ)
+  {
+    /* For safety let's do real runtime check rather than a mere (often skipped in release builds) assert().
+     * This is akin to how Pool_arena::borrow_object() (called below) would act if it's able to detect
+     * a bogus real_serialization. */
+    FLOW_LOG_WARNING("Session [" << *this << "]: SHM-classic-borrow serialization "
+                     "has incorrect size [" << serialization.size() << "] in that it cannot hold "
+                     "the Session-generated scope ID (size [" << SCOPE_ID_SZ << "]).  Borrow op fails.  "
+                     "Was there a bug in transmitting the blob returned by opposing lend_object()?");
+    return nullptr;
+  }
+  // else
+
   Blob real_serialization(serialization); // Copy (it's small).
-  const auto real_serialization_sz = real_serialization.size() - sizeof(scope_id_t);
+
+  const auto real_serialization_sz = real_serialization.size() - SCOPE_ID_SZ;
   real_serialization.start_past_prefix_inc(real_serialization_sz);
-  // Copy it out of there (that should realign it at the target stack location).
-  const auto scope_id = *(reinterpret_cast<const scope_id_t*>(real_serialization.const_data()));
+
+  /* real_serialization.data() is aligned fine if only due to being a (deep) copy.  However we don't know
+   * know for sure that real_serialization_sz implies alignment of scope_id immediately following.  Hence
+   * memcpy() -- do not assign, if only for that reason. */
+  scope_id_t scope_id;
+  memcpy(&scope_id, real_serialization.const_data(), SCOPE_ID_SZ);
+
   real_serialization.start_past_prefix_inc(-real_serialization_sz);
   real_serialization.resize(real_serialization_sz);
   // real_serialization is now the original Arena::lend_object() result.
@@ -347,7 +369,9 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
   }
   // else
 
-  assert(false && "borrow_object() called on invalid value?  Or bug -- forgot to update this method?  IPC fail?");
+  FLOW_LOG_WARNING("Session [" << *this << "]: SHM-classic-borrow serialization "
+                   "has correct size but invalid scope ID [" << scope_id << "].  Borrow op fails.  "
+                   "Was there a bug in transmitting the blob returned by opposing lend_object()?");
   return nullptr;
 } // Session_impl::borrow_object()
 
