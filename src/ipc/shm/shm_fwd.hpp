@@ -18,6 +18,8 @@
 /// @file
 #pragma once
 
+#include <string>
+
 /**
  * Modules for SHared Memory (SHM) support.  At a high level ipc::shm is a collection of sub-modules, each
  * known as a *SHM-provider*, as of this writing most prominently ipc::shm::classic and ipc::shm::arena_lend::jemalloc;
@@ -56,16 +58,16 @@
  *   - Arena-lending: We have one SHM-provider as of this writing: shm::arena_lend::jemalloc; it is an application
  *     of the formalized arena-lending-SHM-provider paradigm specifically to the commercial-grade
  *     3rd party open-source `malloc()` provider (memory manager): [jemalloc](https://jemalloc.net).  It could be
- *     applied to other memory managers; e.g., tcmalloc.  (At the moment we feel jemalloc is easily the most
- *     performant and customizable open-source `malloc()`er around.)  Generally the memory-manager-agnostic aspects
+ *     applied to other memory managers; e.g., tcmalloc.  (At the moment we feel jemalloc is the most
+ *     advanced and customizable open-source `malloc()`er around.)  Generally the memory-manager-agnostic aspects
  *     live in shm::arena_lend; while the SHM-jemalloc-specific ones go into shm::arena_lend::jemalloc.
  *     A major aspect of arena-lending SHM-providers is the separation of the the arena from the lend/borrow
  *     engine (SHM-session).  (Those aspects live in session::shm::arena_lend and session::shm::arena_lend::jemalloc;
  *     again, the memory-manager-agnostic and -non-agnostic aspects respectively.)  With an arena-lending SHM-provider,
  *     *each* of the two processes in a session creates/maintains its own arena, in which the other side cannot
  *     allocate; then via the session object the other side *borrows* an allocated object which it can at least
- *     read (but not deallocate; and by default not write-to).  Thus process 1 maintains a Jemalloc-managed arena;
- *     process 2 borrows objects from it and reads them; and conversely process 2 maintains a Jemalloc-managed arena;
+ *     read (but not deallocate; and by default not write-to).  Thus process 1 maintains a jemalloc-managed arena;
+ *     process 2 borrows objects from it and reads them; and conversely process 2 maintains a jemalloc-managed arena;
  *     process 1 borrows objects from it and reads them.  Hence there are 2 process-local *SHM-arenas* and 1
  *     *SHM-session* for bidirectional lending/borrowing.
  *
@@ -75,7 +77,7 @@
  *   - It is not (and would be -- at best -- extremely difficult to become)
  *     integrated with a commercial-grade memory manager, with features such as anti-fragmentation and thread-caching;
  *     hence the allocation/deallocation of objects may be slower compared to heap-based over time.  We rely on
- *     boost.ipcs's algorithm which lacks the maturity of a jemalloc; and while a custom one could surely replace it,
+ *     boost.ipc's algorithm which lacks the maturity of a jemalloc; and while a custom one could surely replace it,
  *     it would be challenging to improve-upon without bringing in a 3rd-party product; such products are not usually
  *     designed around being placed *entirely* into shared memory.
  *   - Two processes (at least) intensively write to the same memory area; this in the presence of
@@ -122,10 +124,11 @@
  *   - With shm::arena_lend: No.  Anything B1 allocates, by definition, must disappear once B1 exits.  The entire
  *     arena disappears by the time B2 appears.  B2 can read anything that *A* allocated including before B2 was
  *     born, because A is alive as is the arena it maintains; but B1 -- no.
+ *
  * In the ipc::session paradigm this type of data is known as *app-scope* in contrast to most data which are
  * *session-scope*.  For data relevant only to each conversation A-B1, A-B2, A-B3, there is no asymmetry: Internally
- * there are 2 arenas in each of the 3 sessions, but conceptually it might as well be a 1 common arena, since both
- * sides have symmetrical capabilities (allocate, read/write, lend; borrow, read).  So for session-scope data
+ * there are 2 arenas in each of the 3 sessions, but conceptually it might as well be 1 common arena, since both
+ * sides have symmetrical capabilities (allocate, read/write, lend; borrow, read/write).  So for session-scope data
  * shm::classic and shm::arena_lend are identical.
  *
  * ### STL support ###
@@ -146,3 +149,122 @@ template<typename Arena>
 struct Arena_to_borrower_allocator_arena;
 
 } // namespace ipc::shm
+
+/// Stats-related sub-namespace, for ADL segregation and general organization.
+namespace ipc::shm::stat
+{
+
+// Types.
+
+// Find doc headers near the bodies of these compound types.
+
+struct Owner_obj_stats;
+struct Lender_obj_stats;
+struct Borrower_obj_stats;
+struct Live_obj_stats;
+struct Shared_arena_obj_stats;
+
+// Free functions.
+
+/**
+ * Declares the stats for Owner_obj_stats.  Not invoked directly except by `flow::util::stat` internals,
+ * or when composing this stat-set into another.
+ * @see `flow::util::stat` namespace doc header for background on the declare/visit mechanism.
+ *
+ * @tparam Visitor
+ *         See above.
+ * @param name_prefix
+ *        See above.
+ * @param src_stats
+ *        See above.
+ * @param target_stats
+ *        See above.
+ * @param visitor
+ *        See above.
+ */
+template<typename Visitor>
+void declare_stats(std::string name_prefix, const Owner_obj_stats* src_stats, Owner_obj_stats* target_stats,
+                   Visitor&& visitor);
+
+/**
+ * Declares the stats for Lender_obj_stats.  Not invoked directly except by `flow::util::stat` internals,
+ * or when composing this stat-set into another.
+ * @see `flow::util::stat` namespace doc header for background on the declare/visit mechanism.
+ *
+ * @tparam Visitor
+ *         See above.
+ * @param name_prefix
+ *        See above.
+ * @param src_stats
+ *        See above.
+ * @param target_stats
+ *        See above.
+ * @param visitor
+ *        See above.
+ */
+template<typename Visitor>
+void declare_stats(std::string name_prefix, const Lender_obj_stats* src_stats, Lender_obj_stats* target_stats,
+                   Visitor&& visitor);
+
+/**
+ * Declares the stats for Borrower_obj_stats.  Not invoked directly except by `flow::util::stat` internals,
+ * or when composing this stat-set into another.
+ * @see `flow::util::stat` namespace doc header for background on the declare/visit mechanism.
+ *
+ * @tparam Visitor
+ *         See above.
+ * @param name_prefix
+ *        See above.
+ * @param src_stats
+ *        See above.
+ * @param target_stats
+ *        See above.
+ * @param visitor
+ *        See above.
+ */
+template<typename Visitor>
+void declare_stats(std::string name_prefix, const Borrower_obj_stats* src_stats, Borrower_obj_stats* target_stats,
+                   Visitor&& visitor);
+
+/**
+ * Declares the stats for Live_obj_stats.  Not invoked directly except by `flow::util::stat` internals,
+ * or when composing this stat-set into another.
+ * @see `flow::util::stat` namespace doc header for background on the declare/visit mechanism.
+ *
+ * @tparam Visitor
+ *         See above.
+ * @param name_prefix
+ *        See above.
+ * @param src_stats
+ *        See above.
+ * @param target_stats
+ *        See above.
+ * @param visitor
+ *        See above.
+ */
+template<typename Visitor>
+void declare_stats(std::string name_prefix, const Live_obj_stats* src_stats, Live_obj_stats* target_stats,
+                   Visitor&& visitor);
+
+/**
+ * Declares the stats for Shared_arena_obj_stats.  Not invoked directly except by `flow::util::stat` internals,
+ * or when composing this stat-set into another.
+ * @see `flow::util::stat` namespace doc header for background on the declare/visit mechanism.
+ *
+ * @tparam Visitor
+ *         See above.
+ * @param name_prefix
+ *        See above.
+ * @param src_stats
+ *        See above.
+ * @param target_stats
+ *        See above.
+ * @param visitor
+ *        See above.
+ */
+template<typename Visitor>
+void declare_stats(std::string name_prefix,
+                   const Shared_arena_obj_stats* src_stats, Shared_arena_obj_stats* target_stats,
+                   Visitor&& visitor);
+
+} // namespace ipc::shm::stat

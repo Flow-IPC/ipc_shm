@@ -35,15 +35,10 @@ namespace ipc::session::shm::classic
 template<typename Session_t>
 class Session_mv;
 
-template<typename Server_session_impl_t>
-class Server_session_mv;
-template<typename Client_session_impl_t>
-class Client_session_mv;
-
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
+template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
 class Server_session;
 
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
+template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
 class Session_server;
 
 /**
@@ -51,6 +46,9 @@ class Session_server;
  * terms of additional (to that of #Client_session) public behavior, from the public API user's point of
  * view, this class template alias is simply ~exactly identical/symmetrical to shm::classic::Server_session.
  * See its doc header.  That is during PEER state.
+ *
+ * @warning See same-named section of session::Client_session_mv ctor doc header.  In short: the `Client_app`
+ *          and `Server_app` passed to the ctor must outlive `*this`.
  *
  * The only difference is shm::classic::Server_session::app_shm() and `shm::classic::Client_session::app_shm()`
  * (actually Session_mv::app_shm() = both) differ in terms of how one views the lifetime of the
@@ -86,18 +84,18 @@ class Session_server;
  * Just see same spot in shm::classic::Server_session doc header; it explains both client and server sides.
  * @endinternal
  *
- * @tparam S_MQ_TYPE_OR_NONE
+ * @tparam MQ_TYPE_OR_NONE
  *         Identical to session::Client_session.
- * @tparam S_TRANSMIT_NATIVE_HANDLES
+ * @tparam TRANSMIT_NATIVE_HANDLES
  *         Identical to session::Client_session.
  * @tparam Mdt_payload
  *         Identical to session::Client_session.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
+template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
 using Client_session
   = Session_mv
       <session::Client_session_mv
-        <Client_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>;
+        <Client_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>;
 
 // Free functions.
 
@@ -126,11 +124,11 @@ std::ostream& operator<<(std::ostream& os, const Session_mv<Session_t>& val);
  *        Object to serialize.
  * @return `os`.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES,
+template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES,
          typename Mdt_payload>
 std::ostream& operator<<(std::ostream& os,
                          const Server_session
-                                 <S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>& val);
+                                 <MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>& val);
 
 /**
  * Prints string representation of the given `Session_server` to the given `ostream`.
@@ -143,10 +141,10 @@ std::ostream& operator<<(std::ostream& os,
  *        Object to serialize.
  * @return `os`.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES,
+template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES,
          typename Mdt_payload>
 std::ostream& operator<<(std::ostream& os,
                          const Session_server
-                                 <S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>& val);
+                                 <MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>& val);
 
 } // namespace ipc::session::shm::classic

@@ -56,17 +56,17 @@ namespace ipc::session::shm::classic
  * session_shm(), however, is simple.  We just `CREATE_ONLY` it, as its lifetime by definition equals the
  * session's (`*this`).
  *
- * @tparam S_MQ_TYPE_OR_NONE
+ * @tparam MQ_TYPE_OR_NONE
  *         See shm::classic::Server_session counterpart.
- * @tparam S_TRANSMIT_NATIVE_HANDLES
+ * @tparam TRANSMIT_NATIVE_HANDLES
  *         See shm::classic::Server_session counterpart.
  * @tparam Mdt_payload
  *         See shm::classic::Server_session counterpart.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 class Server_session_impl :
   public Session_impl
-           <session::Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload,
+           <session::Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload,
                                          schema::ShmType::CLASSIC,
                                          transport::struc::shm::Builder_base::S_MAX_SERIALIZATION_SEGMENT_SZ>>
 {
@@ -75,7 +75,7 @@ public:
 
   /// Short-hand for our non-`virtual` base.
   using Base = Session_impl
-                 <session::Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload,
+                 <session::Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload,
                                                schema::ShmType::CLASSIC,
                                                transport::struc::shm::Builder_base::S_MAX_SERIALIZATION_SEGMENT_SZ>>;
 
@@ -190,10 +190,10 @@ public:
 
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define TEMPLATE_CLSC_SRV_SESSION_IMPL \
-  template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+  template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define CLASS_CLSC_SRV_SESSION_IMPL \
-  Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>
+  Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>
 
 // Only declared so it could be documented.  Please see async_accept_log_in(); it ensures the documented behavior.
 TEMPLATE_CLSC_SRV_SESSION_IMPL
@@ -330,7 +330,7 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
       Base::Arena::remove_persistent(this->get_logger(), shm_pool_name, &sink);
     });
 
-    return err_code; // == Error_code().
+    return err_code; // == Error_code{}.
   }; // auto real_pre_rsp_setup_func =
 
   /* That's all we needed to do: ensure m_session_shm's underlying pool exists; m_session_shm points to it,

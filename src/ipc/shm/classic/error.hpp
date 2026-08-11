@@ -48,7 +48,7 @@ enum class Code
    * Low-level boost.ipc.shm: boost.interprocess emitted miscellaneous library exception sans a system code;
    * a WARNING message at throw-time should contain all possible details.
    */
-  S_SHM_BIPC_MISC_LIBRARY_ERROR,
+  S_SHM_BIPC_MISC_LIBRARY_ERROR = S_CODE_LOWEST_INT_VALUE,
 
   /// SENTINEL: Not an error.  This Code must never be issued by an error/success-emitting API; I/O use only.
   S_END_SENTINEL
@@ -75,7 +75,7 @@ Error_code make_error_code(Code err_code);
  * @return See above.
  */
 std::istream& operator>>(std::istream& is, Code& val);
-// @todo - `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
+// @todo `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
 
 /**
  * Analogous to transport::error::operator<<().
@@ -87,7 +87,7 @@ std::istream& operator>>(std::istream& is, Code& val);
  * @return See above.
  */
 std::ostream& operator<<(std::ostream& os, Code val);
-// @todo - `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
+// @todo `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
 
 } // namespace ipc::shm::classic::error
 

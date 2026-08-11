@@ -18,7 +18,6 @@
 /// @file
 #pragma once
 
-#include "ipc/shm/stl/stl_fwd.hpp"
 #include "ipc/util/shared_name_fwd.hpp"
 
 /// ipc::shm sub-module with the SHM-classic SHM-provider.  See ipc::shm doc header for introduction.
@@ -30,19 +29,6 @@ namespace ipc::shm::classic
 // Find doc headers near the bodies of these compound types.
 
 class Pool_arena;
-
-/// Convenience alias for a shm::stl::Arena_activator w/r/t Pool_arena.
-using Pool_arena_activator = stl::Arena_activator<Pool_arena>;
-
-/**
- * Convenience alias for a shm::stl::Stateless_allocator> w/r/t Pool_arena;
- * use with #Pool_arena_activator.
- *
- * @tparam T
- *         Pointed-to type for the allocator.  See standard C++ `Allocator` concept.
- */
-template<typename T>
-using Pool_arena_allocator = stl::Stateless_allocator<T, Pool_arena>;
 
 /// Short-hand for util::Shared_name; used in particular for SHM pool names at least.
 using Shared_name = util::Shared_name;
@@ -63,3 +49,74 @@ using Shared_name = util::Shared_name;
 std::ostream& operator<<(std::ostream& os, const Pool_arena& val);
 
 } // namespace ipc::shm::classic
+
+/// Stats-related sub-namespace, for ADL segregation and general organization.
+namespace ipc::shm::classic::stat
+{
+
+// Types.
+
+// Find doc headers near the bodies of these compound types.
+
+struct Arena_stats;
+struct Local_stats;
+struct Arena_info_dump;
+
+// Free functions.
+
+/**
+ * Prints string representation of the given `Arena_info_dump` to the given `ostream`.
+ *
+ * @note `val.m_fmt` (util::stat::Info_dump_format) may contain knobs to affect the shape of the printed output.
+ *
+ * @relatesalso Arena_info_dump
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+std::ostream& operator<<(std::ostream& os, const Arena_info_dump& val);
+
+/**
+ * Declares the stats for Arena_stats.  Not invoked directly except by `flow::util::stat` internals,
+ * or when composing this stat-set into another.
+ * @see `flow::util::stat` namespace doc header for background on the declare/visit mechanism.
+ *
+ * @tparam Visitor
+ *         See above.
+ * @param name_prefix
+ *        See above.
+ * @param src_stats
+ *        See above.
+ * @param target_stats
+ *        See above.
+ * @param visitor
+ *        See above.
+ */
+template<typename Visitor>
+void declare_stats(std::string name_prefix, const Arena_stats* src_stats, Arena_stats* target_stats,
+                   Visitor&& visitor);
+
+/**
+ * Declares the stats for Local_stats.  Not invoked directly except by `flow::util::stat` internals,
+ * or when composing this stat-set into another.
+ * @see `flow::util::stat` namespace doc header for background on the declare/visit mechanism.
+ *
+ * @tparam Visitor
+ *         See above.
+ * @param name_prefix
+ *        See above.
+ * @param src_stats
+ *        See above.
+ * @param target_stats
+ *        See above.
+ * @param visitor
+ *        See above.
+ */
+template<typename Visitor>
+void declare_stats(std::string name_prefix, const Local_stats* src_stats, Local_stats* target_stats,
+                   Visitor&& visitor);
+
+} // namespace ipc::shm::classic::stat

@@ -88,7 +88,7 @@ private:
 // Template static initializers.
 
 template<typename Arena>
-thread_local typename Arena_activator<Arena>::Arena_obj* Arena_activator<Arena>::s_this_thread_active_arena(nullptr);
+thread_local typename Arena_activator<Arena>::Arena_obj* Arena_activator<Arena>::s_this_thread_active_arena{nullptr};
 
 // Template implementations.
 

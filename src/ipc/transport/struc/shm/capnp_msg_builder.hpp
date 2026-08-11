@@ -19,6 +19,7 @@
 #pragma once
 
 #include "ipc/transport/struc/struc_fwd.hpp"
+#include "ipc/transport/struc/serializer_stats.hpp"
 #include "ipc/session/shm/shm.hpp"
 #include "ipc/shm/stl/arena_activator.hpp"
 #include "ipc/shm/stl/stateless_allocator.hpp"
@@ -153,8 +154,18 @@ public:
    *        Logger to use for logging subsequently.
    * @param arena
    *        See shm::Builder ctor.
+   * @param segment_sz_init_pre_growth
+   *        This is chosen as the min size of the segment for the first allocateSegment().
+   *        If it can be estimated, reasonably tightly, to be large enough for the entire message, then
+   *        it can lead to significant perf wins: fewer `calloc()/memset()` cycles spent, and the entire message
+   *        being in 1 segment.
+   * @param stats
+   *        Optional pointer to the cumulative stats to update.  If not null, pointee must outlive `*this`.
    */
-  explicit Capnp_message_builder(flow::log::Logger* logger_ptr, Arena* arena);
+  explicit Capnp_message_builder(flow::log::Logger* logger_ptr, Arena* arena,
+                                 size_t segment_sz_init_pre_growth
+                                   = sizeof(::capnp::word) * ::capnp::SUGGESTED_FIRST_SEGMENT_WORDS,
+                                 struc::stat::Serializer_stats::Snd* stats = nullptr);
 
   /// Decrements owner-process count by 1; if current count is 1 deallocates SHM-stored data.
   ~Capnp_message_builder();
@@ -199,15 +210,15 @@ public:
    * @note The strange capitalization (that goes against standard Flow-IPC style) is because we are implementing
    *       a capnp API.
    *
-   * @param min_sz
+   * @param min_sz_words
    *        See `MessageBuilder` API.
-   *        The allocated segment will allow for a serialization of at *least* `min_sz * sizeof(word)` bytes.
+   *        The allocated segment will allow for a serialization of at *least* `min_sz_words * sizeof(word)` bytes.
    *        The actual amount grows progressively similarly to the `MallocMessageBuilder` GROW_HEURISTICALLY
    *        strategy, starting at the same recommended first-segment size as `MallocMessageBuilder` as well.
    * @return See `MessageBuilder` API.
    *         The ptr and size of the area for capnp to serialize-to.
    */
-  kj::ArrayPtr<::capnp::word> allocateSegment(unsigned int min_sz) override;
+  kj::ArrayPtr<::capnp::word> allocateSegment(unsigned int min_sz_words) override;
 
 private:
   // Types.
@@ -221,17 +232,33 @@ private:
   Arena* m_arena;
 
   /**
-   * Minimum size of the next segment allocated by allocateSegment.  Roughly speaking the actual size will be
-   * the higher of `min_sz` or this.  Its initial value (seg 1's) is a constant.  Its subsequent value is
-   * the sum of sizes of the previous segments; meaning itself plus whatever allocateSegment() decided to allocate.
-   * This results in exponential growth... ish.
+   * Minimum size of the next segment allocated by allocateSegment(); a word-multiple.
+   * The actual size will be the higher of `min_sz` or this.  Its initial value (seg 1's) comes from ctor arg.
+   * Its subsequent value is the sum of sizes of the previous segments; meaning itself plus whatever allocateSegment()
+   * decided to allocate.  This results in exponential growth... ish.
    *
    * This follows `MallocMessageBuilder` GROW_HEURISTICALLY logic, straight-up lifted from their source code.
    */
   size_t m_segment_sz;
 
-  /// Outer SHM handle to the data structured in SHM that stores the capnp-requested serialization segments.
+  /// Outer SHM handle to the data structure in SHM that stores the capnp-requested serialization segments.
   typename Arena::template Handle<Segments_in_shm> m_serialization_segments;
+
+  /// Cumulative stats target, or null if no stats recording is configured.
+  struc::stat::Serializer_stats::Snd* const m_stats;
+
+  /**
+   * Running tally: sum of `seg_sz` chosen for each allocateSegment() call.  Sampled
+   * into #m_stats at dtor; also used to decrement the alloc-bytes-outstanding gauge.
+   * It is only used for stats, so it's untouched if null #m_stats.
+   */
+  uint64_t m_alloc_sz;
+
+  /**
+   * Gate: `false` until the first big-leaf event happens; then flipped to `true`, and `m_msgs_with_big_leaf` stat
+   * goes up.  It is only used for stats, so it's untouched if null #m_stats.
+   */
+  bool m_saw_big_leaf;
 }; // class Capnp_message_builder
 
 // Free functions: in *_fwd.hpp.
@@ -240,14 +267,17 @@ private:
 
 template<typename Shm_arena>
 Capnp_message_builder<Shm_arena>::Capnp_message_builder
-  (flow::log::Logger* logger_ptr, Arena* arena) :
+  (flow::log::Logger* logger_ptr, Arena* arena, size_t segment_sz_init_pre_growth,
+   struc::stat::Serializer_stats::Snd* stats) :
 
   flow::log::Log_context(logger_ptr, Log_component::S_TRANSPORT),
   m_arena(arena),
-  // Borrow MallocMessageBuilder's heuristic:
-  m_segment_sz(::capnp::SUGGESTED_FIRST_SEGMENT_WORDS * sizeof(::capnp::word)),
+  m_segment_sz(flow::util::round_to_multiple(segment_sz_init_pre_growth, sizeof(::capnp::word))),
   // Construct the data structure holding the segments, saving a small shared_ptr handle into SHM.
-  m_serialization_segments(m_arena->template construct<Segments_in_shm>()) // Can throw.
+  m_serialization_segments(m_arena->template construct<Segments_in_shm>()), // Can throw.
+  m_stats(stats),
+  m_alloc_sz(0),
+  m_saw_big_leaf(false)
 {
   FLOW_LOG_TRACE("SHM builder [" << *this << "]: Created.");
 }
@@ -255,10 +285,54 @@ Capnp_message_builder<Shm_arena>::Capnp_message_builder
 template<typename Shm_arena>
 Capnp_message_builder<Shm_arena>::~Capnp_message_builder()
 {
+  using flow::util::stat::fetch_sub;
+
   FLOW_LOG_TRACE("SHM builder [" << *this << "]: Destroyed.  The following may SHM-dealloc the serialization, "
                  "if recipient was done with it before us, or if we hadn't done lend() yet.");
+
+  /* Stats: end-of-life sampling.  No-op if no stats configured, or if `*this` was never used to
+   * actually allocate (e.g., a Msg_out was constructed but never serialized).
+   *
+   * @todo This code is, at least at a glance, almost identical to Heap_fixed_builder_capnp_message_builder's dtor.
+   * allocateSegment() is similar but not the same; but the below is 95%+ the same.  Should find a way
+   * to factor this out (without sacrificing perf).  Incidentally: note we log above -- and it's a useful log when
+   * tracking details of the lifetime of an actual payload -- but the other guy does not.  So if there's a refactor,
+   * this detail would figure into it somehow.
+   *
+   * For the moment keeping comments light; see comments in-line in the other guy. */
+  if ((!m_stats) || m_serialization_segments->empty())
+  {
+    return;
+  }
+  // else
+
+#ifndef NDEBUG
+  const auto prev_alloc_outstanding_sz =
+#endif
+  fetch_sub(&m_stats->m_alloc_outstanding_sz, m_alloc_sz);
+  assert((prev_alloc_outstanding_sz >= m_alloc_sz)
+         && "GAUGE underflow: dtor's per-msg subtraction exceeds the cumulative outstanding.");
+
+#ifndef NDEBUG
+  const auto prev_msgs_outstanding =
+#endif
+  fetch_sub(&m_stats->m_msgs_outstanding, 1);
+  assert((prev_msgs_outstanding >= 1)
+         && "GAUGE underflow: dtor decrement on already-zero msgs-outstanding.");
+
+  m_stats->m_histo_msg_alloc_sz.record_value(m_alloc_sz);
+
+  uint64_t used_bytes = 0;
+  for (const auto& capnp_seg : getSegmentsForOutput())
+  {
+    used_bytes += capnp_seg.asBytes().size();
+  }
+  m_stats->m_histo_msg_used_sz.record_value(used_bytes);
+
+  m_stats->m_histo_segs_per_msg.record_value(m_serialization_segments->size());
+
   // m_serialization_segments Handle<> (shared_ptr<>) ref-count will decrement here (possibly to 0).
-}
+} // Capnp_message_builder::~Capnp_message_builder()
 
 template<typename Shm_arena>
 bool Capnp_message_builder<Shm_arena>::lend
@@ -286,7 +360,7 @@ bool Capnp_message_builder<Shm_arena>::lend
     /* As noted: activate the arena, in case the below .resize() causes allocation.  (It shouldn't... we're
      * resizing down.  Better safe than sorry, plus it's more maintainable.  (What if it becomes a deque<> later
      * or something?)) */
-    Arena_activator arena_ctx(m_arena);
+    Arena_activator arena_ctx{m_arena};
 
     // All of the below is much like Heap_fixed_builder_capnp_message_builder::emit_segment_blobs() except as noted.
 
@@ -337,11 +411,11 @@ bool Capnp_message_builder<Shm_arena>::lend
                   get_logger()); // (TRACE-log if enabled.)  Must be removed if Segment_in_shm becomes non-Blob.
 
       FLOW_LOG_TRACE("SHM builder [" << *this << "]: "
-                     "Serialization segment [" << idx << "] (0 based, of [" << capnp_segs.size() << "], 1-based): "
+                     "Serialization segment [" << idx << "] (0-based, of [" << capnp_segs.size() << "], 1-based): "
                      "SHM-arena buffer @[" << static_cast<const void*>(&(blob.front())) << "] "
                      "sized [" << seg_sz << "]: Serialization of segment complete.");
       FLOW_LOG_DATA("Segment contents: "
-                    "[\n" << buffers_dump_string(Blob_const(&(blob.front()), blob.size()), "  ") << "].");
+                    "[\n" << buffers_dump_string(Blob_const{&(blob.front()), blob.size()}, "  ") << "].");
     } // for (idx in [0, size()))
   } // Arena_activator arena_ctx(m_arena);
 
@@ -382,15 +456,17 @@ bool Capnp_message_builder<Shm_arena>::lend
 
 template<typename Shm_arena>
 kj::ArrayPtr<::capnp::word>
-  Capnp_message_builder<Shm_arena>::allocateSegment(unsigned int min_sz) // Virtual.
+  Capnp_message_builder<Shm_arena>::allocateSegment(unsigned int min_sz_words) // Virtual.
 {
+  using flow::util::stat::fetch_add;
+  using flow::util::stat::update_hi_wmark;
   using Word = ::capnp::word;
   using Capnp_word_buf = kj::ArrayPtr<Word>;
   using flow::util::ceil_div;
-  using std::memset;
   constexpr size_t WORD_SZ = sizeof(Word);
+  const size_t min_sz = size_t(min_sz_words) * WORD_SZ; // Don't forget: in their API min_sz is in `word`s.
 
-  /* Background from capnp: They're saying the need the allocated space for serialization to store at least min_sz:
+  /* Background from capnp: They're saying they need the allocated space for serialization to store at least min_sz:
    * probably they're going to store some object that needs at least this much space.  So typically it's some
    * scalar leaf thing, like 4 bytes or whatever; but it could be larger -- or even huge (e.g., a Data or List
    * of huge size, because the user mutated it so via a ::Builder).  Oh, and it has to be zeroed, as by calloc().
@@ -401,43 +477,82 @@ kj::ArrayPtr<::capnp::word>
    * as capnp::MallocMessageBuilder internally does (check its source code).  Of course, if min_sz exceeds that,
    * then we have no choice but to allocate the larger amount min_sz. */
 
-  const size_t seg_sz
-    = std::max(size_t(min_sz), // Don't forget: in their API min_sz is in `word`s.
-               /* Seems prudent to give capnp an area that is a multiple of `word`s.  Maybe required.  Probably even.
-                * Exceeding it a little is okay. */
-               size_t(ceil_div(m_segment_sz, WORD_SZ)))
-      * WORD_SZ;
+  const bool big_leaf = min_sz > m_segment_sz;
+  const size_t seg_sz = big_leaf ? min_sz : m_segment_sz; // m_segment_sz is maintained to be a word-multiple.
 
-  FLOW_LOG_TRACE("SHM builder [" << *this << "]: allocateSegment request for >=[" << min_sz << "] words; "
+  FLOW_LOG_TRACE("SHM builder [" << *this << "]: allocateSegment request for >=[" << min_sz_words << "] words; "
                  "SHM-allocing ~max(that x sizeof(word), next-size=[" << m_segment_sz << "]) = [" << seg_sz << "] "
                  "bytes.");
 
   uint8_t* buf_ptr;
   {
-    Arena_activator arena_ctx(m_arena);
+    Arena_activator arena_ctx{m_arena};
 
     // Go to it!  This can throw (which as noted elsewhere is treated as a catastrophe a-la `new` bad_alloc for now).
     buf_ptr = &(m_serialization_segments->emplace_back
                   (seg_sz,
+                   flow::util::CLEAR_ON_ALLOC,
                    // (TRACE-log in this ctor if enabled.)  Must be removed if Segment_in_shm becomes non-Blob.
                    get_logger()).front());
+
+    /* Attn!  capnp requires: it must be zeroed.  And Basic_blob(CLEAR_ON_ALLOC) ctor we used *does* zero it.
+     * So do not memset() it.  This is, at worst, syntactic sugar; at best it can bring significant perf improvements
+     * (e.g., calloc(64Ki) we've seen be ~20% faster than malloc() + memset()).
+     *
+     * @todo That said: in our case (where the allocator is SHM-aware) Basic_blob will be (as of this writing;
+     * see Basic_blob::reserve_impl()) forced to internaly separately allocate-then-memset-zeroes, meaning it's mere
+     * syntactic sugar in that case.  There are as of this writing some notes there about how we might, for
+     * SHM-classic and SHM-jemalloc specificaly even, be able to do better here: perhaps by somehow triggering
+     * <relevant allocator>::allocate() to in fact alloc-and-clear to the best of the SHM-provider's ability.
+     * So see those notes in Basic_blob::reserver_impl() and come back to Flow-IPC-land to see what we might do
+     * for a perf bump here.
+     *
+     * Caution!  If you choose to change-over to vector<..., util::Default_init_allocator<...>> instead, then
+     * you'll need to have `std::memset(buf_ptr, 0, seg_sz)` (or some equivalent) here. */
   } // Arena_activator arena_ctx(m_arena);
 
-  /* capnp requires: it must be zeroed.  And Basic_blob ctor we used does *not* zero it.  So memset() it.
-   * Caution!  If you choose to change-over to vector<..., util::Default_init_allocator<...>> instead, then
-   * you'll still need to keep `std::memset(buf_ptr, 0, seg_sz)` here. */
-  memset(buf_ptr, 0, seg_sz);
-
   // Since we are supposed to grow exponentially, increase this for next time (if any):
-  m_segment_sz += seg_sz;
+  m_segment_sz += seg_sz; // Word-multiple + word-multiple = word-multiple.
   /* @todo MallocMessageBuilder does some bounding according to some maximum.  Probably we must do the same.
    * Get back to this and follow capnp-interface reqs and/or follow what their internal logic does. */
 
   FLOW_LOG_TRACE("SHM builder [" << *this << "]: Next-size grew exponentially to [" << m_segment_sz << "] "
                  "for next time.");
 
-  return Capnp_word_buf(reinterpret_cast<Word*>(buf_ptr),
-                        reinterpret_cast<Word*>(buf_ptr + seg_sz));
+  /* Stats:  Mirror Heap_fixed_builder_capnp_message_builder (we do similar things as it does but in SHM
+   * instead of heap).  Keeping comments light.
+   *
+   * Differences (we just don't touch those stats; they remain zero if only we are given that stats struct):
+   *   - The segment growth is not constrained in our case.
+   *   - We don't need to leave space for any frame-prefix. */
+  if (m_stats)
+  {
+    if (m_serialization_segments->size() == 1)
+    {
+      fetch_add(&m_stats->m_msgs, 1);
+      update_hi_wmark(&m_stats->m_msgs_outstanding_hi_wmark,
+                      fetch_add(&m_stats->m_msgs_outstanding, 1) + 1);
+    }
+
+    fetch_add(&m_stats->m_alloc_lifetime_sz, seg_sz);
+    update_hi_wmark(&m_stats->m_alloc_outstanding_sz_hi_wmark,
+                    fetch_add(&m_stats->m_alloc_outstanding_sz, seg_sz) + seg_sz);
+    m_alloc_sz += seg_sz;
+
+    if (big_leaf)
+    {
+      fetch_add(&m_stats->m_big_leaf_alloc_count, 1);
+      m_stats->m_histo_big_leaf_sz.record_value(min_sz);
+      if (!m_saw_big_leaf)
+      {
+        m_saw_big_leaf = true;
+        fetch_add(&m_stats->m_msgs_with_big_leaf, 1);
+      }
+    }
+  } // if (m_stats)
+
+  return Capnp_word_buf{reinterpret_cast<Word*>(buf_ptr),
+                        reinterpret_cast<Word*>(buf_ptr + seg_sz)};
 } // Capnp_message_builder::allocateSegment()
 
 template<typename Shm_arena>

@@ -56,7 +56,7 @@ struct ShmTopSerialization
   # - Each element Blob::size() is the size used by the serialization, in that segment;
   # - Each Blob::capacity() is the (equal or greater) buffer size allocated for that segment by the
   #   MessageBuilder.
-  # Hence a SegmentArrayReader is to be fed each Blob's [begin, end()) range, and the resulting
+  # Hence a SegmentArrayMessageReader is to be fed each Blob's [begin, end()) range, and the resulting
   # MessageReader is the zero-copy deserialization of the originally mutated schema.
   #
   # For info on serializing the list<Blob> into ShmHandle and deserializing from Shm_handle to list<Blob>,

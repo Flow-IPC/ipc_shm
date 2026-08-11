@@ -53,9 +53,9 @@ int main(int argc, char const * const * argv)
      * E.g., ipc_transport_structured link_test uses a thread loop. */
 
     using Session = ipc::session::shm::classic::Client_session<ipc::session::schema::MqType::BIPC, false>;
-    Session session(&(*log_logger),
+    Session session{&(*log_logger),
                     CLI_APPS.find(CLI_NAME)->second,
-                    SRV_APPS.find(SRV_NAME)->second, [](auto&&...) {});
+                    SRV_APPS.find(SRV_NAME)->second, [](auto&&...) {}};
 
     FLOW_LOG_INFO("Session-client attempting to open session against session-server; "
                   "it'll either succeed or fail very soon; on success at that point we will receive a message and "
@@ -66,8 +66,8 @@ int main(int argc, char const * const * argv)
     FLOW_LOG_INFO("Session/channels opened.  Awaiting one message; then exiting.");
 
     Session::Structured_channel<link_test::FunBody>
-      chan(&(*log_logger), std::move(chans.front()),
-           ipc::transport::struc::Channel_base::S_SERIALIZE_VIA_SESSION_SHM, &session);
+      chan{&(*log_logger), std::move(chans.front()),
+           ipc::transport::struc::Channel_base::S_SERIALIZE_VIA_SESSION_SHM, &session};
     chan.start([](auto&&...) {});
 
     promise<void> done_promise;

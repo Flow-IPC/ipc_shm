@@ -105,7 +105,7 @@ int main(int argc, char const * const * argv)
     msg_root.setCoolVal(42);
     msg_root.setCoolString("Hello, world!");
     FLOW_LOG_INFO("Sending a structured message over pre-opened channel.");
-    chan.send(msg);
+    chan.send(&msg);
 
     // Don't judge us.  Again, we aren't demo-ing best practices here!
     FLOW_LOG_INFO("Sleeping for a few sec to avoid yanking channel away from other side right after opening it.  "

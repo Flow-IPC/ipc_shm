@@ -107,25 +107,16 @@ public:
   using Borrower_allocator
     = ipc::shm::stl::Stateless_allocator<T, ipc::shm::Arena_to_borrower_allocator_arena_t<Arena>>;
 
-  /**
-   * Implements Session API per contract.
-   * @see Session::Structured_channel: implemented concept.
-   */
+  /// Implements Session API per contract.
   template<typename Message_body>
   using Structured_channel
     = typename transport::struc::shm::classic::Channel<typename Base::Base::Impl::Session_base_obj::Channel_obj,
                                                        Message_body>;
 
-  /**
-   * Implements Session API per contract.
-   * @see Session::Structured_msg_builder_config: implemented concept.
-   */
+  /// Implements Session API per contract.
   using Structured_msg_builder_config = typename Base::Base::Impl::Structured_msg_builder_config;
 
-  /**
-   * Implements Session API per contract.
-   * @see Session::Structured_msg_reader_config: implemented concept.
-   */
+  /// Implements Session API per contract.
   using Structured_msg_reader_config = typename Base::Base::Impl::Structured_msg_reader_config;
 
   /// Alias for a light-weight blob used in borrow_object() and lend_object().
@@ -282,9 +273,13 @@ public:
 
   /**
    * Returns builder config suitable for capnp-serializing out-messages in SHM arena session_shm().
+   * @param segment1_sz
+   *        See eponymous arg to, say, transport::struc::sync_io::Channel ctor with `Serialize_via_session_shm` tag.
    * @return See above.
    */
-  Structured_msg_builder_config session_shm_builder_config();
+  Structured_msg_builder_config
+    session_shm_builder_config(size_t segment1_sz
+                                        = sizeof(::capnp::word) * ::capnp::SUGGESTED_FIRST_SEGMENT_WORDS);
 
   /**
    * When transmitting items originating in #Arena session_shm() via
@@ -309,9 +304,13 @@ public:
 
   /**
    * Identical to session_shm_builder_config() but backed by SHM arena app_shm() instead of session_shm().
+   * @param segment1_sz
+   *        See eponymous arg to, say, transport::struc::sync_io::Channel ctor with `Serialize_via_app_shm` tag.
    * @return See above.
    */
-  Structured_msg_builder_config app_shm_builder_config();
+  Structured_msg_builder_config
+    app_shm_builder_config(size_t segment1_sz
+                                    = sizeof(::capnp::word) * ::capnp::SUGGESTED_FIRST_SEGMENT_WORDS);
 
   /**
    * When transmitting items originating in #Arena app_shm() via transport::struc::shm::Builder::emit_serialization()
@@ -377,10 +376,10 @@ typename CLASS_CLSC_SESSION_MV::Arena::template Handle<T>
 
 TEMPLATE_CLSC_SESSION_MV
 typename CLASS_CLSC_SESSION_MV::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_MV::session_shm_builder_config()
+  CLASS_CLSC_SESSION_MV::session_shm_builder_config(size_t segment1_sz)
 {
   assert(Base::Base::impl() && "Do not call this on as-if-default-cted Session.");
-  return Base::Base::impl()->session_shm_builder_config();
+  return Base::Base::impl()->session_shm_builder_config(segment1_sz);
 }
 
 TEMPLATE_CLSC_SESSION_MV
@@ -401,10 +400,10 @@ typename CLASS_CLSC_SESSION_MV::Structured_msg_reader_config
 
 TEMPLATE_CLSC_SESSION_MV
 typename CLASS_CLSC_SESSION_MV::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_MV::app_shm_builder_config()
+  CLASS_CLSC_SESSION_MV::app_shm_builder_config(size_t segment1_sz)
 {
   assert(Base::Base::impl() && "Do not call this on as-if-default-cted Session.");
-  return Base::Base::impl()->app_shm_builder_config();
+  return Base::Base::impl()->app_shm_builder_config(segment1_sz);
 }
 
 TEMPLATE_CLSC_SESSION_MV

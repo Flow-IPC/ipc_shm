@@ -19,6 +19,7 @@
 #pragma once
 
 #include "ipc/transport/struc/shm/schema/common.capnp.h"
+#include "ipc/transport/struc/struc_fwd.hpp"
 #include <flow/util/basic_blob.hpp>
 
 // Types.
@@ -55,10 +56,8 @@ namespace ipc::transport::struc::shm
 class Builder_base;
 template<typename Shm_arena>
 class Builder;
-
 template<typename Shm_arena>
 class Reader;
-
 template<typename Shm_arena>
 class Capnp_message_builder;
 
@@ -144,3 +143,95 @@ template<typename Shm_arena>
 std::ostream& operator<<(std::ostream& os, const Capnp_message_builder<Shm_arena>& val);
 
 } // namespace ipc::transport::struc::shm
+
+/// Stats-related sub-namespace, for ADL segregation and general organization.
+namespace ipc::transport::struc::shm::stat
+{
+
+// Types.
+
+// Find doc headers near the bodies of these compound types.
+
+struct Outer_serializer_stats_cfg;
+struct Core_serializer_stats_cfg;
+struct Serializer_info_dump;
+template<typename Arena>
+struct Shm_msg_outer_tag;
+
+/**
+ * Default-constructible Serializer_stats variant for the heap-side outer envelope of a SHM-backed
+ * message.  See Serializer_stats doc header.
+ */
+using Outer_serializer_stats = struc::stat::Serializer_stats_p<Outer_serializer_stats_cfg>;
+
+/**
+ * Default-constructible Serializer_stats variant for the SHM-side payload of a SHM-backed message.
+ * See Serializer_stats doc header.
+ */
+using Core_serializer_stats = struc::stat::Serializer_stats_p<Core_serializer_stats_cfg>;
+
+/**
+ * SHM-msg-outer (heap-side envelope) cumulative-#Outer_serializer_stats singleton: convenience
+ * alias for the `flow::util::stat::Global_stats` instantiated with Shm_msg_outer_tag,
+ * per-`Arena`.
+ *
+ * @tparam Arena
+ *         See #Core_serializer_global_stats.
+ */
+template<typename Arena>
+using Outer_serializer_global_stats
+  = flow::util::stat::Global_stats<Shm_msg_outer_tag<Arena>, Outer_serializer_stats, 1>;
+
+/**
+ * SHM-msg-inner (SHM-resident user payload) cumulative-#Core_serializer_stats singleton:
+ * convenience alias for the `flow::util::stat::Global_stats` instantiated with the `Arena`
+ * type itself as tag.
+ *
+ * @tparam Arena
+ *         A particular SHM-provider's arena type: the guy with `Arena::construct<T>(...)`.
+ *         Accessible, among other ways, as eponymous alias in SHM-enabled `Session`; so
+ *         for example for SHM-classic and SHM-jemalloc that's
+ *         session::shm::classic::Session_mv::Arena (resolves to shm::classic::Pool_arena) and
+ *         session::shm::arena_lend::jemalloc::Session_mv::Arena (resolves to
+ *         shm::arena_lend::jemalloc::Ipc_arena) respectively.
+ */
+template<typename Arena>
+using Core_serializer_global_stats
+  = flow::util::stat::Global_stats<Arena, Core_serializer_stats, 1>;
+
+// Free functions.
+
+/**
+ * Grabs a snapshot of *everything in serializer global-land* -- for the given SHM-provider `Arena` -- into
+ * `*target_info_dump` which can then be read/printed/aggregated at leisure.  That is (see Serializer_info_dump):
+ * the pure-heap, SHM-msg-outer, and SHM-msg-core global serializer stat-sets (3 singletons).
+ *
+ * If your application uses two SHM providers (unusual), call this once per `Arena` type; note the
+ * `m_heap` part shall be redundant between the two results.
+ *
+ * (This does not affect any serializer object that has been redirected -- via the relevant builder/reader config
+ * knobs -- to accumulate into a custom `Serializer_stats` instead of the relevant default global.)
+ *
+ * @tparam Arena
+ *         See #Core_serializer_global_stats.
+ * @param target_info_dump
+ *        The stats are assigned here (via `flow::util::stat::stats_assign()`).  Must not be null.
+ */
+template<typename Arena>
+void serializer_info_dump(Serializer_info_dump* target_info_dump);
+
+/**
+ * Prints the entire Serializer_info_dump stats bundle to the given `ostream`, formatted per `val.m_fmt`
+ * (see Serializer_info_dump doc header).
+ *
+ * @relatesalso Serializer_info_dump
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+std::ostream& operator<<(std::ostream& os, const Serializer_info_dump& val);
+
+} // namespace ipc::transport::struc::shm::stat

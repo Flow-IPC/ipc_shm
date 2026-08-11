@@ -45,7 +45,7 @@ void capnp_set_lent_shm_handle(schema::ShmHandle::Builder* shm_handle_root,
   assert(((!field_inited_already) || (capnp_blob_builder.size() == n))
          && "Please only pass-in uninitialized ShmHandle field or one filled-out by this same function earlier.");
 
-  lend_result.sub_copy(lend_result.begin(), Blob_mutable(capnp_blob_builder.begin(), n));
+  lend_result.sub_copy(lend_result.begin(), Blob_mutable{capnp_blob_builder.begin(), n});
 } // capnp_set_lent_shm_handle()
 
 void capnp_get_shm_handle_to_borrow(const schema::ShmHandle::Reader& shm_handle_root,
@@ -56,7 +56,7 @@ void capnp_get_shm_handle_to_borrow(const schema::ShmHandle::Reader& shm_handle_
   assert(arg_to_borrow);
 
   const auto capnp_blob_reader = shm_handle_root.getSerialization();
-  arg_to_borrow->assign_copy(Blob_const(capnp_blob_reader.begin(), capnp_blob_reader.size()));
+  arg_to_borrow->assign_copy(Blob_const{capnp_blob_reader.begin(), capnp_blob_reader.size()});
 
   assert(!arg_to_borrow->empty());
 } // capnp_get_shm_handle_to_borrow()

@@ -22,6 +22,7 @@
 #include "ipc/session/shm/classic/server_session.hpp"
 #include "ipc/session/detail/session_server_impl.hpp"
 #include "ipc/transport/struc/schema/common.capnp.h"
+#include "ipc/transport/struc/struc_fwd.hpp"
 #include <boost/move/make_unique.hpp>
 
 namespace ipc::session::shm::classic
@@ -59,32 +60,32 @@ namespace ipc::session::shm::classic
  * If you read/grok that, then the present class's impl should be straightforward to follow.
  * @endinternal
  *
- * @tparam S_MQ_TYPE_OR_NONE
+ * @tparam MQ_TYPE_OR_NONE
  *         See vanilla #Session_server.
- * @tparam S_TRANSMIT_NATIVE_HANDLES
+ * @tparam TRANSMIT_NATIVE_HANDLES
  *         See vanilla #Session_server.
  * @tparam Mdt_payload
  *         See vanilla #Session_server.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 class Session_server :
   private Session_server_impl // Attn!  Emit `shm::classic::Server_session`s (impl customization point).
-            <Session_server<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>,
-             Server_session<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>>
+            <Session_server<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>,
+             Server_session<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>>
 {
 private:
   // Types.
 
   /// Short-hand for our base/core impl.
   using Impl = Session_server_impl
-                 <Session_server<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>,
-                  Server_session<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>>;
+                 <Session_server<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>,
+                  Server_session<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>>;
 
 public:
   // Types.
 
   /// Short-hand for the concrete `Server_session`-like type emitted by async_accept().
-  using Server_session_obj = shm::classic::Server_session<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>;
+  using Server_session_obj = shm::classic::Server_session<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>;
 
   /// Short-hand for Session_mv::Mdt_reader_ptr.
   using Mdt_reader_ptr = typename Impl::Mdt_reader_ptr;
@@ -108,7 +109,12 @@ public:
 
   /**
    * Constructor: identical to session::Session_server ctor.  See its doc header.  Consider also
-   * pool_size_limit_mi() mutator (though if there are no problems in practice, then you can leave it alone).
+   * pool_size_limit_mi() mutator (though if there are no problems in practice, then you can leave it alone) and
+   * possibly other knob mutator(s) in that vein.
+   *
+   * @warning See same-named section of session::Session_server ctor doc header.  In short: `srv_app_ref`
+   *          and `cli_app_master_set_ref` (and its `Client_app`s) must outlive `*this` and any yielded
+   *          `Server_session`.
    *
    * @param logger_ptr
    *        See above.
@@ -121,7 +127,7 @@ public:
    */
   explicit Session_server(flow::log::Logger* logger_ptr, const Server_app& srv_app_ref,
                           const Client_app::Master_set& cli_app_master_set_ref,
-                          Error_code* err_code = 0);
+                          Error_code* err_code = nullptr);
 
   /**
    * Destructor: contract is identical to session::Session_server dtor.
@@ -280,6 +286,19 @@ public:
                     Task_err&& on_done_func);
 
   /**
+   * Identical to eponymous accessor in session::Session_server.
+   * @return See above.
+   */
+  size_t mq_msg_size_limit() const;
+
+  /**
+   * Identical to eponymous mutator in session::Session_server.
+   * @param limit
+   *        See above.
+   */
+  void mq_msg_size_limit(size_t limit);
+
+  /**
    * Returns pointer to the per-`app` SHM-arena, whose lifetime extends until `*this` is destroyed;
    * or null if the given Client_app has not yet opened at least 1 shm::classic::Server_session via
    * async_accept().  Alternatively you may use shm::classic::Session_mv::app_shm() off any session object
@@ -335,9 +354,14 @@ public:
    *
    * @param app
    *        See app_shm().
+   * @param segment1_sz
+   *        See eponymous arg to, say, transport::struc::sync_io::Channel ctor with `Serialize_via_app_shm` tag.
    * @return See above.
    */
-  Structured_msg_builder_config app_shm_builder_config(const Client_app& app);
+  Structured_msg_builder_config
+    app_shm_builder_config(const Client_app& app,
+                           size_t segment1_sz
+                                    = sizeof(::capnp::word) * ::capnp::SUGGESTED_FIRST_SEGMENT_WORDS);
 
   /**
    * In short, what app_shm_builder_config() is to shm::classic::Session_mv::app_shm_builder_config(),
@@ -414,7 +438,7 @@ private:
   const Server_app& m_srv_app_ref;
 
   /// Identical Session_base::m_srv_namespace.  Used in init_app_shm_as_needed() name calc.
-  const Shared_name m_srv_namespace;
+  Shared_name m_srv_namespace;
 
   /// Protects #m_app_shm_by_name and #m_shm_pool_names.
   mutable Mutex m_app_shm_mutex;
@@ -446,10 +470,10 @@ private:
 
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define TEMPLATE_CLSC_SESSION_SRV \
-  template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+  template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define CLASS_CLSC_SESSION_SRV \
-  Session_server<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>
+  Session_server<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>
 
 TEMPLATE_CLSC_SESSION_SRV
 CLASS_CLSC_SESSION_SRV::Session_server(flow::log::Logger* logger_ptr, const Server_app& srv_app_ref_arg,
@@ -460,17 +484,23 @@ CLASS_CLSC_SESSION_SRV::Session_server(flow::log::Logger* logger_ptr, const Serv
          { return init_app_shm_as_needed(app); }), // Impl customization point: create *(app_shm()) for the `app`.
   m_pool_size_limit_mi(2048), // This is configurable; this is the default.  @todo Maybe have constant for this magic #.
   m_srv_app_ref(Impl::m_srv_app_ref),
-  m_srv_namespace
-    (Server_session_dtl<Server_session_obj>(nullptr, m_srv_app_ref, transport::sync_io::Native_socket_stream())
-       .base().srv_namespace()),
+  // (m_srv_namespace: initialized just below.)
   m_shm_pool_names(boost::make_shared<std::vector<Shared_name>>())
 {
+  using transport::sync_io::Native_socket_stream;
+
   // Before we continue: handle that Impl ctor may have thrown (then we don't get here) or emitted error via *err_code.
   if (err_code && *err_code)
   {
     return;
   }
   // else Impl ctor executed fine.
+
+  {
+    auto empty_session_public
+      = Server_session_dtl<Server_session_obj>::ct_base(nullptr, m_srv_app_ref, Native_socket_stream{});
+    m_srv_namespace = Server_session_dtl<Server_session_obj>{ empty_session_public }.base().srv_namespace();
+  }
 
   /* This is a (as of this writing -- the) *cleanup point* for any pools previously created on behalf of this
    * Server_app by previous active processes before us.  The session_shm() pools are gracefully cleaned up
@@ -485,7 +515,11 @@ CLASS_CLSC_SESSION_SRV::Session_server(flow::log::Logger* logger_ptr, const Serv
    * (not including) the PID (m_srv_namespace).  Our own m_srv_namespace was just determined and is unique
    * across time by definition (internally, it's -- again -- our PID); so any existing pools are by
    * definition old.  Note that as of this writing there is at most *one* active process (instance) of a
-   * given Server_app. */
+   * given Server_app.
+   *
+   * A note on stats: A stat surface for this cleanup point has been considered and deliberately omitted;
+   * see similar note in session::Session_server_impl ctor (and a longer discussion in
+   * shm::arena_lend::jemalloc::Session_server::cleanup()). */
   util::remove_each_persistent_with_name_prefix<Arena>
     (get_logger(), build_conventional_shared_name_prefix(Shared_name::S_RESOURCE_TYPE_ID_SHM,
                                                          Shared_name::ct(m_srv_app_ref.m_name)));
@@ -535,13 +569,13 @@ Error_code CLASS_CLSC_SESSION_SRV::init_app_shm_as_needed(const Client_app& app)
   /* We are in some unspecified thread; actually *a* Session_server_impl thread Ws (a Server_session_impl thread W).
    * Gotta lock at least to protect from concurrent calls to ourselves on behalf of other async_accept()s. */
 
-  Lock_guard app_shm_lock(m_app_shm_mutex);
+  Lock_guard app_shm_lock{m_app_shm_mutex};
 
   auto& app_shm = m_app_shm_by_name[app.m_name]; // Find; insert if needed.
   if (app_shm)
   {
     // Cool; already exists, as app.m_name seen already (and successfully set-up, as seen below) by us.
-    return Error_code();
+    return {};
   }
   // else
 
@@ -611,7 +645,7 @@ Error_code CLASS_CLSC_SESSION_SRV::init_app_shm_as_needed(const Client_app& app)
   }
 
   return err_code;
-  // Lock_guard app_shm_lock(m_app_shm_mutex): unlocks here.
+  // Lock_guard app_shm_lock{m_app_shm_mutex}: unlocks here.
 } // Session_server::init_app_shm_as_needed()
 
 TEMPLATE_CLSC_SESSION_SRV
@@ -619,24 +653,32 @@ typename CLASS_CLSC_SESSION_SRV::Arena* CLASS_CLSC_SESSION_SRV::app_shm(const Cl
 {
   // We are in some unspecified thread; we promised thread safety form any concurrency situation.
 
-  Lock_guard app_shm_lock(m_app_shm_mutex);
+  Lock_guard app_shm_lock{m_app_shm_mutex};
 
   /* Subtlety: Due to an intentional quirk of init_app_shm_as_needed(), if it's in the map, the ptr may still be null:
    * init_app_shm_as_needed() failed for app.m_name but does not erase in that case and just leaves null. */
   const auto map_it = m_app_shm_by_name.find(app.m_name);
   return (map_it == m_app_shm_by_name.end()) ? nullptr : map_it->second.get();
-
-  // Lock_guard app_shm_lock(m_app_shm_mutex): unlocks here.
 }
 
 TEMPLATE_CLSC_SESSION_SRV
 typename CLASS_CLSC_SESSION_SRV::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_SRV::app_shm_builder_config(const Client_app& app)
+  CLASS_CLSC_SESSION_SRV::app_shm_builder_config(const Client_app& app, size_t segment1_sz)
 {
+  using transport::struc::shm::stat::Outer_serializer_global_stats;
+  using transport::struc::shm::stat::Core_serializer_global_stats;
+
   const auto arena = app_shm(app);
   assert(arena && "By contract do not call this for not-yet-encountered Client_app.");
 
-  return Structured_msg_builder_config(get_logger(), 0, 0, arena);
+  return Structured_msg_builder_config{ get_logger(), segment1_sz,
+                                        transport::struc::BUILDER_CONFIG_FRAME_PREFIX_SZ_VIA_STRUC_CHANNEL,
+                                        arena,
+                                        // Default snd-stats targets: per-Arena SHM-msg-{inner,outer} globals.
+                                        &Core_serializer_global_stats<Arena>::get()
+                                          .stats_mutable_default().m_snd,
+                                        &Outer_serializer_global_stats<Arena>::get()
+                                          .stats_mutable_default().m_snd };
 }
 
 TEMPLATE_CLSC_SESSION_SRV
@@ -653,10 +695,15 @@ TEMPLATE_CLSC_SESSION_SRV
 typename CLASS_CLSC_SESSION_SRV::Structured_msg_reader_config
   CLASS_CLSC_SESSION_SRV::app_shm_reader_config(const Client_app& app)
 {
+  using transport::struc::shm::stat::Outer_serializer_global_stats;
+
   const auto arena = app_shm(app);
   assert(arena && "By contract do not call this for not-yet-encountered Client_app.");
 
-  return Structured_msg_reader_config(get_logger(), arena);
+  return Structured_msg_reader_config{ get_logger(), arena,
+                                       // Default rcv-stats target: per-Arena SHM-msg-outer global.
+                                       &Outer_serializer_global_stats<Arena>::get()
+                                         .stats_mutable_default().m_rcv };
 }
 
 TEMPLATE_CLSC_SESSION_SRV
@@ -688,6 +735,18 @@ void CLASS_CLSC_SESSION_SRV::async_accept(Server_session_obj* target_session,
 {
   Impl::async_accept(target_session, init_channels_by_srv_req, mdt_from_cli_or_null, init_channels_by_cli_req,
                      std::move(n_init_channels_by_srv_req_func), std::move(mdt_load_func), std::move(on_done_func));
+}
+
+TEMPLATE_CLSC_SESSION_SRV
+size_t CLASS_CLSC_SESSION_SRV::mq_msg_size_limit() const
+{
+  return Impl::mq_msg_size_limit();
+}
+
+TEMPLATE_CLSC_SESSION_SRV
+void CLASS_CLSC_SESSION_SRV::mq_msg_size_limit(size_t limit)
+{
+  Impl::mq_msg_size_limit(limit);
 }
 
 TEMPLATE_CLSC_SESSION_SRV

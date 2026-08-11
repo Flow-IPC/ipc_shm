@@ -23,6 +23,7 @@
 #include "ipc/session/shm/classic/classic.hpp"
 #include "ipc/transport/struc/shm/classic/classic_fwd.hpp"
 #include "ipc/transport/struc/shm/classic/classic.hpp"
+#include "ipc/transport/struc/struc_fwd.hpp"
 #include <cstring>
 
 namespace ipc::session::shm::classic
@@ -120,9 +121,11 @@ public:
 
   /**
    * See shm::classic::Session_mv counterpart.
+   * @param segment1_sz
+   *        See shm::classic::Session_mv counterpart.
    * @return See shm::classic::Session_mv counterpart.
    */
-  Structured_msg_builder_config session_shm_builder_config();
+  Structured_msg_builder_config session_shm_builder_config(size_t segment1_sz);
 
   /**
    * See shm::classic::Session_mv counterpart.
@@ -138,9 +141,11 @@ public:
 
   /**
    * See shm::classic::Session_mv counterpart.
+   * @param segment1_sz
+   *        See shm::classic::Session_mv counterpart.
    * @return See shm::classic::Session_mv counterpart.
    */
-  Structured_msg_builder_config app_shm_builder_config();
+  Structured_msg_builder_config app_shm_builder_config(size_t segment1_sz);
 
   /**
    * See shm::classic::Session_mv counterpart.
@@ -204,9 +209,11 @@ private:
    *
    * @param session_else_app_scope
    *        Whether you want session_shm() or app_shm() to back the serialization.
+   * @param segment1_sz
+   *        See above.
    * @return See above.
    */
-  Structured_msg_builder_config shm_builder_config(bool session_else_app_scope);
+  Structured_msg_builder_config shm_builder_config(bool session_else_app_scope, size_t segment1_sz);
 
   /**
    * Implementation of session_shm_reader_config(), app_shm_reader_config().
@@ -306,7 +313,7 @@ typename CLASS_CLSC_SESSION_IMPL::Blob
   Blob real_serialization(serialization.size() + sizeof(scope_id));
   real_serialization.emplace_copy(real_serialization.begin(), serialization.const_buffer());
   real_serialization.emplace_copy(real_serialization.begin() + serialization.size(),
-                                  Blob_const(&scope_id, sizeof(scope_id)));
+                                  Blob_const{&scope_id, sizeof(scope_id)});
 
   FLOW_LOG_TRACE("Session [" << *this << "]: SHM-classic-lend serialization: "
                  "[" << buffers_dump_string(real_serialization.const_buffer(), "  ") << "].");
@@ -377,24 +384,39 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
 
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_IMPL::shm_builder_config(bool session_else_app_scope)
+  CLASS_CLSC_SESSION_IMPL::shm_builder_config(bool session_else_app_scope, size_t segment1_sz)
 {
+  using transport::struc::shm::stat::Outer_serializer_global_stats;
+  using transport::struc::shm::stat::Core_serializer_global_stats;
+
   const auto arena = session_else_app_scope ? session_shm() : app_shm();
-  return Structured_msg_builder_config{ get_logger(), 0, 0, arena };
+  return Structured_msg_builder_config{ get_logger(), segment1_sz,
+                                        transport::struc::BUILDER_CONFIG_FRAME_PREFIX_SZ_VIA_STRUC_CHANNEL,
+                                        arena,
+                                        // Default snd-stats targets: per-Arena SHM-msg-{inner,outer} globals.
+                                        &Core_serializer_global_stats<Arena>::get()
+                                          .stats_mutable_default().m_snd,
+                                        &Outer_serializer_global_stats<Arena>::get()
+                                          .stats_mutable_default().m_snd };
 } // Session_impl_util::shm_builder_config()
 
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Structured_msg_reader_config
   CLASS_CLSC_SESSION_IMPL::shm_reader_config(bool session_else_app_scope)
 {
-  return Structured_msg_reader_config{ get_logger(), session_else_app_scope ? session_shm() : app_shm() };
+  using transport::struc::shm::stat::Outer_serializer_global_stats;
+
+  return Structured_msg_reader_config{ get_logger(), session_else_app_scope ? session_shm() : app_shm(),
+                                       // Default rcv-stats target: per-Arena SHM-msg-outer global.
+                                       &Outer_serializer_global_stats<Arena>::get()
+                                         .stats_mutable_default().m_rcv };
 } // Session_impl_util::shm_reader_config()
 
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_IMPL::session_shm_builder_config()
+  CLASS_CLSC_SESSION_IMPL::session_shm_builder_config(size_t segment1_sz)
 {
-  return shm_builder_config(true);
+  return shm_builder_config(true, segment1_sz);
 }
 
 TEMPLATE_CLSC_SESSION_IMPL
@@ -413,9 +435,9 @@ typename CLASS_CLSC_SESSION_IMPL::Structured_msg_reader_config
 
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_IMPL::app_shm_builder_config()
+  CLASS_CLSC_SESSION_IMPL::app_shm_builder_config(size_t segment1_sz)
 {
-  return shm_builder_config(false);
+  return shm_builder_config(false, segment1_sz);
 }
 
 TEMPLATE_CLSC_SESSION_IMPL

@@ -21,6 +21,7 @@
 #include "ipc/session/shm/classic/classic.hpp"
 #include "ipc/shm/classic/classic.hpp"
 #include "ipc/session/detail/shm/classic/server_session_impl.hpp"
+#include "ipc/session/detail/session_fwd.hpp"
 #include "ipc/session/shm/classic/session.hpp"
 #include "ipc/session/server_session.hpp"
 #include <boost/move/make_unique.hpp>
@@ -32,7 +33,7 @@ namespace ipc::session::shm::classic
 
 /**
  * Identical to session::Server_session in every way, except that it makes available two SHM arenas, from the
- * SHM-classic provider (ipc::shm::classic::Pool_arena), symmetrically accessible by the opposing side. These
+ * SHM-classic provider (ipc::shm::classic::Pool_arena), symmetrically accessible by the opposing side.  These
  * SHM arenas (see #Arena doc header) have different scopes:
  *   - Per-session-scope, accessible via session_shm(): meaning it shall be accessible only during the lifetime of
  *     this session, by this Session (via this accessor) and the opposing Session (via its counterpart thereof).
@@ -56,8 +57,8 @@ namespace ipc::session::shm::classic
  * transport::Channel or transport::struc::Channel), then recover a handle via borrow_object() on that
  * opposing side.
  *
- * By using `shm::stl::Arena_activator<Arena>` (alias shm::classic::Pool_arena_activator) and
- * #Allocator (alias shm::classic::Pool_arena_allocator) it is possible to construct and transmit not just POD (Plain
+ * By using `shm::stl::Arena_activator<Arena>` (alias shm::classic::Pool_arena::Activator) and
+ * #Allocator (alias shm::classic::Pool_arena::Allocator) it is possible to construct and transmit not just POD (Plain
  * Old Datatype) objects but combinations of those with unlimited nested levels of STL-compliant containers.
  * On the borrowing side use #Borrower_allocator for maximum SHM-provider-independence of your code.  (But see
  * the following note: your algorithm may require features not available in the alternative, SHM-jemalloc,
@@ -84,17 +85,17 @@ namespace ipc::session::shm::classic
  * copied into/out of the low-level transport are merely the SHM handle (and all of this is hidden from the user
  * outside of the delightful near-zero-copy perf properties).
  *
- * There are two ways to make this happen.  The easiest and best way is, when constructing the
- * `struc::Channel`, to use the tag-form ctor with tag
- * transport::struc::Channel_base::Serialize_via_shm_classic.  Simply provide that tag,
- * `this` (or, symmetrically, `shm::classic::Client_session::this` on the other side), and specify which of the
- * 2 scopes you desire (per-session or per-app: a `bool`).
- *
- * The harder way, albeit allowing for certain advanced setups, is to manually create a
- * `transport::struc::shm::classic::Builder::Config` and/or `Reader::Config`,
- * passing in `this->session_shm()` and/or `this->app_shm()`, to those;
- * and then pass the `Config` or `Config`s to the non-tag-form of `struc::Channel`
- * ctor.
+ * There are a few ways to make this happen, including and ranging between the following:
+ *   - Use type alias session::shm::classic::Session_mv::Structured_channel (`Session_mv` is super-class of
+ *     classic::Server_session and classic::Client_session).  To the ctor provide
+ *     either transport::struc::Channel_base::Serialize_via_session_shm or `...Serialize_via_app_shm`
+ *     (thus selecting the scope); and `this` (or `Client_session` counterpart on the other side -- by that
+ *     point they're both conceptually `Session`s).
+ *   - The harder way, albeit allowing for certain advanced setups, is to manually create a
+ *     `transport::struc::shm::classic::Builder::Config` and/or replace `Builder` with `Reader`,
+ *     passing in `this->session_shm()` and/or `this->app_shm()`, to those;
+ *     and then pass the `Config` or `Config`s to the non-tag-form of `struc::Channel`
+ *     ctor.
  *
  * This is all documented on transport::struc::Channel.  Do realize, though, that those niceties are
  * really built on this class template and/or the opposing shm::classic::Client_session.  To use them with
@@ -205,17 +206,17 @@ namespace ipc::session::shm::classic
  *
  * @endinternal
  *
- * @tparam S_MQ_TYPE_OR_NONE
+ * @tparam MQ_TYPE_OR_NONE
  *         Identical to session::Server_session.
- * @tparam S_TRANSMIT_NATIVE_HANDLES
+ * @tparam TRANSMIT_NATIVE_HANDLES
  *         Identical to session::Server_session.
  * @tparam Mdt_payload
  *         Identical to session::Server_session.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 class Server_session :
   public Session_mv<session::Server_session_mv
-                      <Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>
+                      <Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>
 {
 public:
   // Types.
@@ -223,14 +224,14 @@ public:
   /// Short-hand for our base class.  To the user: note its `public` API is inherited.
   using Base = Session_mv
                  <session::Server_session_mv
-                    <Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>;
+                    <Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>;
 
   // Constructors/destructor.
 
   /// Inherit default, move ctors.
   using Base::Base;
 
-protected:
+private:
   // Constructors.
 
   /**
@@ -253,10 +254,10 @@ protected:
 
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define TEMPLATE_CLSC_SRV_SESSION \
-  template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+  template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define CLASS_CLSC_SRV_SESSION \
-  Server_session<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>
+  Server_session<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>
 
 TEMPLATE_CLSC_SRV_SESSION
 CLASS_CLSC_SRV_SESSION::Server_session(flow::log::Logger* logger_ptr, const Server_app& srv_app_ref_arg,
