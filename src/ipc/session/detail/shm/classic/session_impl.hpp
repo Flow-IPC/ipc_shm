@@ -310,7 +310,7 @@ typename CLASS_CLSC_SESSION_IMPL::Blob
    * quite impossible for it to know.  Even if one understands what's inside `serialization` (spoiler alert -- currently
    * Pool_arena places there offset from pool base addr), its meaning is only meaningful when knowing
    * the Arena. */
-  Blob real_serialization(serialization.size() + sizeof(scope_id));
+  Blob real_serialization{serialization.size() + sizeof(scope_id)};
   real_serialization.emplace_copy(real_serialization.begin(), serialization.const_buffer());
   real_serialization.emplace_copy(real_serialization.begin() + serialization.size(),
                                   Blob_const{&scope_id, sizeof(scope_id)});
@@ -350,7 +350,7 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
   }
   // else
 
-  Blob real_serialization(serialization); // Copy (it's small).
+  Blob real_serialization{serialization}; // Copy (it's small).
 
   const auto real_serialization_sz = real_serialization.size() - SCOPE_ID_SZ;
   real_serialization.start_past_prefix_inc(real_serialization_sz);
