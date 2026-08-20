@@ -430,7 +430,7 @@ public:
    *        See above.
    * @return See above.
    */
-  kj::Own<Msg_out> newOutgoingMessage(unsigned int seg0_word_sz) override;
+  kj::Own<Rpc_msg_out> newOutgoingMessage(unsigned int seg0_word_sz) override;
 
   /**
    * Implements `capnp::VatNetwork` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
@@ -438,7 +438,7 @@ public:
    *
    * @return See above.
    */
-  kj::Promise<kj::Maybe<kj::Own<Msg_in>>> receiveIncomingMessage() override;
+  kj::Promise<kj::Maybe<kj::Own<Rpc_msg_in>>> receiveIncomingMessage() override;
 
   /**
    * Implements `capnp::VatNetwork` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
@@ -451,8 +451,8 @@ public:
 private:
   // Types.
 
-  class Msg_out_impl;
-  class Msg_in_impl;
+  class Rpc_msg_out_impl;
+  class Rpc_msg_in_impl;
 
   /**
    * Disposer for `Own<Rpc_conn>` returned by `connect()` and `accept()` which (1) does not delete anything
@@ -564,7 +564,7 @@ private:
    * So roughly speaking:
    *   - We have #m_network do as much as possible.
    *   - The parts it cannot do (holding messages in SHM, reading them from there) we do ourselves
-   *     (chiefly via our #Msg_in and #Msg_out impls Msg_in_impl and Msg_out_impl, respectively).
+   *     (chiefly via our `Rpc_msg_in` and `Rpc_msg_out` impls Rpc_msg_in_impl and Rpc_msg_out_impl, respectively).
    *
    * Null until early in the ctor body; then not null.
    */
@@ -674,22 +674,24 @@ private:
 }; // class Session_vat_network
 
 /**
+ * @private
+ *
  * Inner impl class in Session_vat_network, implementing `capnp::OutgoingRpcMessage`, which makes up roughly
  * 50% of what Session_vat_network does on top of its contained `TwoPartyVatNetwork`.  (The other ~50% =
- * Msg_in_impl.)  To wit:
- *   - It reuses `TwoPartyVatNetwork`'s impl of #Msg_out to implement an outgoing byte stream but instead of
+ * Rpc_msg_in_impl.)  To wit:
+ *   - It reuses `TwoPartyVatNetwork`'s impl of `Rpc_msg_out` to implement an outgoing byte stream but instead of
  *     loading `rpc::Message`s into it (and the heap), it loads little SHM-handles to those `rpc::Message`s.
  *   - It creates/registers these SHM-handles and hooks things up in such a way as to cause those `rpc::Message`s
  *     to be constructed in SHM instead of heap.
  */
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-class Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl : public Msg_out
+class Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl : public Rpc_msg_out
 {
 public:
   // Constructors/destructor.
 
   /**
-   * Saves the `TwoPartyVatNetwork` #Msg_out impl, as created by Session_vat_network::m_network, and the
+   * Saves the `TwoPartyVatNetwork` `Rpc_msg_out` impl, as created by Session_vat_network::m_network, and the
    * containing Session_vat_network.
    *
    * @param msg
@@ -699,15 +701,15 @@ public:
    * @param daddy
    *        See above.
    */
-  Msg_out_impl(kj::Own<Msg_out>&& msg, size_t seg0_word_sz, Session_vat_network* daddy);
+  Rpc_msg_out_impl(kj::Own<Rpc_msg_out>&& msg, size_t seg0_word_sz, Session_vat_network* daddy);
 
   /// Boring virtual destructor.
-  virtual ~Msg_out_impl();
+  virtual ~Rpc_msg_out_impl();
 
   // Methods.
 
   /**
-   * Implements #Msg_out API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
+   * Implements `Rpc_msg_out` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
    * as opposed to the user.  The odd styling of the name is due to the interface being implemented.
    *
    * @return See above.
@@ -715,7 +717,7 @@ public:
   capnp::AnyPointer::Builder getBody() override;
 
   /**
-   * Implements #Msg_out API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
+   * Implements `Rpc_msg_out` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
    * as opposed to the user.  The odd styling of the name is due to the interface being implemented.
    *
    * @param fds
@@ -724,13 +726,13 @@ public:
   void setFds(kj::Array<int> fds) override;
 
   /**
-   * Implements #Msg_out API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
+   * Implements `Rpc_msg_out` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
    * as opposed to the user.  The odd styling of the name is due to the interface being implemented.
    */
   void send() override;
 
   /**
-   * Implements #Msg_out API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
+   * Implements `Rpc_msg_out` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
    * as opposed to the user.  The odd styling of the name is due to the interface being implemented.
    *
    * @return See above.
@@ -744,36 +746,38 @@ private:
   Session_vat_network* const m_daddy;
 
   /**
-   * The vanilla `TwoPartyVatNetwork`-generated #Msg_out, where we shall store capnp-encoded SHM-handle
+   * The vanilla `TwoPartyVatNetwork`-generated `Rpc_msg_out`, where we shall store capnp-encoded SHM-handle
    * from within #m_capnp_msg_in_shm.
    */
-  kj::Own<Msg_out> m_msg;
+  kj::Own<Rpc_msg_out> m_msg;
 
   /**
    * The `capnp::MessageBuilder` that stores the capnp-serialization needed by the user of a `*this`
    * (which we happen to know is the `rpc::Message` schema) in SHM using the Flow-IPC SHM system.
    */
   Capnp_message_builder<Shm_arena> m_capnp_msg_in_shm;
-}; // class Session_vat_network::Msg_out_impl
+}; // class Session_vat_network::Rpc_msg_out_impl
 
 /**
+ * @private
+ *
  * Inner impl class in Session_vat_network, implementing `capnp::IncomingRpcMessage`, which makes up roughly
  * 50% of what Session_vat_network does on top of its contained `TwoPartyVatNetwork`.  (The other ~50% =
- * Msg_out_impl.)  To wit:
- *   - It reuses `TwoPartyVatNetwork`'s impl of #Msg_in to implement an incoming byte stream but instead of
+ * Rpc_msg_out_impl.)  To wit:
+ *   - It reuses `TwoPartyVatNetwork`'s impl of `Rpc_msg_in` to implement an incoming byte stream but instead of
  *     getting `rpc::Message`s out of it (and the heap), it interprets it as the little SHM-handles
  *     to those `rpc::Message`s.
  *   - It obtains/registers these SHM-handles and hooks things up in such a way as to cause those `rpc::Message`s
  *     to be read (by getBody() called) directly from SHM instead of heap.
  */
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-class Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl : public Msg_in
+class Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl : public Rpc_msg_in
 {
 public:
   // Constructors/destructor.
 
   /**
-   * Saves the `TwoPartyVatNetwork` #Msg_in impl, as created by Session_vat_network::m_network, and the
+   * Saves the `TwoPartyVatNetwork` `Rpc_msg_in` impl, as created by Session_vat_network::m_network, and the
    * containing Session_vat_network.
    *
    * @param msg
@@ -781,15 +785,15 @@ public:
    * @param daddy
    *        See above.
    */
-  Msg_in_impl(kj::Own<Msg_in>&& msg, Session_vat_network* daddy);
+  Rpc_msg_in_impl(kj::Own<Rpc_msg_in>&& msg, Session_vat_network* daddy);
 
   /// Boring virtual destructor.
-  virtual ~Msg_in_impl();
+  virtual ~Rpc_msg_in_impl();
 
   // Methods.
 
   /**
-   * Implements #Msg_in API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
+   * Implements `Rpc_msg_in` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
    * as opposed to the user.  The odd styling of the name is due to the interface being implemented.
    *
    * @return See above.
@@ -797,7 +801,7 @@ public:
   capnp::AnyPointer::Reader getBody() override;
 
   /**
-   * Implements #Msg_in API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
+   * Implements `Rpc_msg_in` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
    * as opposed to the user.  The odd styling of the name is due to the interface being implemented.
    *
    * @return See above.
@@ -805,7 +809,7 @@ public:
   kj::ArrayPtr<kj::AutoCloseFd> getAttachedFds() override;
 
   /**
-   * Implements #Msg_in API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
+   * Implements `Rpc_msg_in` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
    * as opposed to the user.  The odd styling of the name is due to the interface being implemented.
    *
    * @return See above.
@@ -816,27 +820,27 @@ private:
   // Data.
 
   /**
-   * The vanilla `TwoPartyVatNetwork`-generated #Msg_out, where we shall store capnp-encoded SHM-handle
-   * from within #m_capnp_msg_in_shm.
+   * The vanilla `TwoPartyVatNetwork`-generated `Rpc_msg_in`, storing the capnp-encoded SHM-handle
+   * which #m_capnp_msg_in_shm interprets.
    */
-  kj::Own<Msg_in> m_msg;
+  kj::Own<Rpc_msg_in> m_msg;
 
   /**
    * The `capnp::MessageReader` that stores the capnp-serialization needed by the user of a `*this`
    * (which we happen to know is the `rpc::Message` schema) in SHM using the Flow-IPC SHM system.
    */
   Capnp_message_reader<Shm_arena> m_capnp_msg_in_shm;
-}; // class Msg_in_impl
+}; // class Rpc_msg_in_impl
 
 // Free functions: in *_fwd.hpp.
 
 // Template implementations.
 
-// Session_vat_network::Msg_out_impl implementations.
+// Session_vat_network::Rpc_msg_out_impl implementations.
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::Msg_out_impl
-  (kj::Own<Msg_out>&& msg, size_t seg0_word_sz, Session_vat_network* daddy) :
+Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::Rpc_msg_out_impl
+  (kj::Own<Rpc_msg_out>&& msg, size_t seg0_word_sz, Session_vat_network* daddy) :
 
   m_daddy(daddy),
   m_msg(std::move(msg)),
@@ -848,19 +852,19 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::Msg_out_i
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::~Msg_out_impl() = default;
+Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::~Rpc_msg_out_impl() = default;
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 capnp::AnyPointer::Builder
-  Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::getBody()
+  Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::getBody()
 {
-  /* This is just what TwoPartyVatNetwork's Msg_out_impl equivalent does -- but via its MallocMessageBuilder,
+  /* This is just what TwoPartyVatNetwork's Rpc_msg_out_impl equivalent does -- but via its MallocMessageBuilder,
    * whereas we use our in-SHM MessageBuilder from Flow-IPC. */
   return m_capnp_msg_in_shm.template getRoot<capnp::AnyPointer>();
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::send()
+void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::send()
 {
   using capnp::AnyPointer;
   namespace rpc = ::capnp::rpc;
@@ -900,8 +904,8 @@ void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::send
   auto shm_top_serialization_root = capnp_msg_in_heap_root.initShmTopSerialization();
   const bool ok = m_capnp_msg_in_shm.lend(&shm_top_serialization_root, m_daddy->m_shm_lnd_brw);
   /* Now the message in SHM is safe from deallocation until both m_capnp_msg_in_shm is destroyed with *this,
-   * *and* the receiver MessageReader (see Msg_in_impl) has had .borrow() called on it, and that MessageReader
-   * is destroyed with its containing Msg_in_impl. */
+   * *and* the receiver MessageReader (see Rpc_msg_in_impl) has had .borrow() called on it, and that MessageReader
+   * is destroyed with its containing Rpc_msg_in_impl. */
 
   KJ_REQUIRE(ok,
              "Was asked to send a capnp-message by the RPC-system, but Capnp_message_builder::lend() "
@@ -960,10 +964,10 @@ void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::send
   } // if (logger_ptr)
 
   m_msg->send(); // Now let it be smart about buffering m_msg a bit, or whatever it wants to do.
-} // Session_vat_network::Msg_out_impl::send()
+} // Session_vat_network::Rpc_msg_out_impl::send()
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-size_t Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::sizeInWords()
+size_t Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::sizeInWords()
 {
   return m_msg->sizeInWords();
   /* @todo Ensure this is used for byte-stream perf or something.  If not we might conceivably want to return
@@ -971,7 +975,7 @@ size_t Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::si
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::setFds(kj::Array<int> fds)
+void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::setFds(kj::Array<int> fds)
 {
   m_msg->setFds(std::move(fds));
   /* Note: I (ygoldfel) admit to being puzzled as to why this signature takes Array<> by value... while
@@ -979,11 +983,11 @@ void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_out_impl::setF
    * murky, but that can be explained (omitted).  Odd... maybe I am the one missing something though! */
 }
 
-// Session_vat_network::Msg_in_impl implementations.
+// Session_vat_network::Rpc_msg_in_impl implementations.
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl::Msg_in_impl
-  (kj::Own<Msg_in>&& msg, Session_vat_network* daddy) :
+Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::Rpc_msg_in_impl
+  (kj::Own<Rpc_msg_in>&& msg, Session_vat_network* daddy) :
 
   m_msg(std::move(msg)),
   // Create a new MessageReader -- that reads in SHM!  m_msg's internal MessageReader reads from heap.
@@ -1003,7 +1007,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl::Msg_in_imp
                "we cannot receive a message with zero-copy over it.  Stuff is going down.  This is not "
                "usually some catastrophe; just the IPC conversation has finished.");
 
-  // (Re. logging: see comment in Msg_out_impl::send(); applies equally here.)
+  // (Re. logging: see comment in Rpc_msg_out_impl::send(); applies equally here.)
   const auto logger_ptr = daddy->get_logger();
   if (logger_ptr)
   {
@@ -1029,20 +1033,20 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl::Msg_in_imp
                     "\n" << ostreamable_capnp_full(root));
     }
   } // if (logger_ptr)
-} // Session_vat_network::Msg_in_impl::Msg_in_impl()
+} // Session_vat_network::Rpc_msg_in_impl::Rpc_msg_in_impl()
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl::~Msg_in_impl() = default;
+Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::~Rpc_msg_in_impl() = default;
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 capnp::AnyPointer::Reader
-  Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl::getBody()
+  Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::getBody()
 {
   return m_capnp_msg_in_shm.template getRoot<capnp::AnyPointer>();
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-size_t Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl::sizeInWords()
+size_t Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::sizeInWords()
 {
   return m_msg->sizeInWords();
   /* @todo Ensure this is used for byte-stream perf or something.  If not we might conceivably want to return
@@ -1051,7 +1055,7 @@ size_t Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl::siz
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 kj::ArrayPtr<kj::AutoCloseFd>
-  Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Msg_in_impl::getAttachedFds()
+  Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::getAttachedFds()
 {
   return m_msg->getAttachedFds();
 }
@@ -1132,7 +1136,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   {
     is_short_lived_msg_func = [](Capnp_msg_reader_interface& msg_in) -> bool
     {
-      /* In Msg_out_impl we mark this bool appropriately, so just interpret it.
+      /* In Rpc_msg_out_impl we mark this bool appropriately, so just interpret it.
        * This code here is inspired by the impl of capnp::IncomingRpcMessage::getShortLivedCallback(). */
       return msg_in.getRoot<capnp::AnyPointer>().template getAs<schema::detail::CapnpRpcMsgTopSerialization>()
                                                 .getIsShortLivedMsg();
@@ -1140,7 +1144,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   }
   else // if (special mode where we do nothing useful)
   {
-    is_short_lived_msg_func = Msg_in::getShortLivedCallback(); // Just do what TwoPartyVatNetwork would od.
+    is_short_lived_msg_func = Rpc_msg_in::getShortLivedCallback(); // Just do what TwoPartyVatNetwork would od.
   }
 
   ReaderOptions network_reader_opts; // Default values.
@@ -1252,18 +1256,20 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::~Session_vat_network()
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-kj::Own<Msg_out> Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::newOutgoingMessage(unsigned int seg0_word_sz)
+kj::Own<Rpc_msg_out>
+  Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::newOutgoingMessage(unsigned int seg0_word_sz)
 {
-  /* Pre-process by dropping in our own Msg_out impl (in terms of the vanilla one from TwoPartyVatNetwork).
+  /* Pre-process by dropping in our own Rpc_msg_out impl (in terms of the vanilla one from TwoPartyVatNetwork).
    *
    * As for message/segment size guesses:
    *   - For the byte-streamed (little, SHM-handle-bearing) message:
    *     - See m_msg_out_max_sz_words doc header for background.
    *     - Once a message has gone out, we know what to guess.
    *     - The first time spitball an okay -- not tight -- value (it'll go down next time).
-   *   - Pass-on the "user" out-message size guess to our Msg_out impl, so it can try to efficiently allocate in SHM. */
+   *   - Pass-on the "user" out-message size guess to our Rpc_msg_out impl, so it can try to efficiently
+   *     allocate in SHM. */
   return m_shm_lnd_brw
-           ? kj::heap<Msg_out_impl>
+           ? kj::heap<Rpc_msg_out_impl>
                (m_conn->newOutgoingMessage((m_msg_out_max_sz_words == 0)
                                              ? ((Builder_base::S_MAX_SERIALIZATION_SEGMENT_SZ / sizeof(::capnp::word))
                                                 + capnp::sizeInWords<schema::detail::CapnpRpcMsgTopSerialization>())
@@ -1274,15 +1280,15 @@ kj::Own<Msg_out> Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::newOut
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-kj::Promise<kj::Maybe<kj::Own<Msg_in>>>
+kj::Promise<kj::Maybe<kj::Own<Rpc_msg_in>>>
   Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::receiveIncomingMessage()
 {
   /* The normal TwoPartyVatNetwork::receiveIncomingMessage() returns a promise to async-read bits off wire
    * if possible/appropriate; essentially yielding on success a heap-stored capnp::MessageReader + 0+ native-handles;
-   * and if so basically bundling them in its impl of Msg_in, which provides accessors via its `virtual` impl
+   * and if so basically bundling them in its impl of Rpc_msg_in, which provides accessors via its `virtual` impl
    * methods like getBody().  That's all just fine for our purposes!  Just that MessageReader will contain
    * merely an encoding of a handle-into-SHM, where the actual message is stored; so we ourselves implement
-   * Msg_in; store the aforementioned vanilla Msg_in (with the handle) inside; and have our getBody() access
+   * Rpc_msg_in; store the aforementioned vanilla Rpc_msg_in (with the handle) inside; and have our getBody() access
    * the in-SHM serialization (according to that SHM-handle) instead... mission accomplished. */
   auto vanilla_result = m_conn->receiveIncomingMessage();
   if (!m_shm_lnd_brw)
@@ -1291,12 +1297,13 @@ kj::Promise<kj::Maybe<kj::Own<Msg_in>>>
   }
   // else: Actually do something useful.
 
-  return vanilla_result.then([this](kj::Maybe<kj::Own<Msg_in>>&& msg_uptr_maybe)
-                               -> kj::Maybe<kj::Own<Msg_in>>
+  return vanilla_result.then([this](kj::Maybe<kj::Own<Rpc_msg_in>>&& msg_uptr_maybe)
+                               -> kj::Maybe<kj::Own<Rpc_msg_in>>
   {
     KJ_IF_MAYBE(msg_uptr_ptr, msg_uptr_maybe)
     {
-      return kj::heap<Msg_in_impl>(kj::mv(*msg_uptr_ptr), this); // Post-process by dropping in our own Msg_in impl.
+      // Post-process by dropping in our own Rpc_msg_in impl.
+      return kj::heap<Rpc_msg_in_impl>(kj::mv(*msg_uptr_ptr), this);
     }
     // else
     return nullptr;

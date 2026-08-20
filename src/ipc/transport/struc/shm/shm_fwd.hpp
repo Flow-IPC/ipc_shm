@@ -273,7 +273,7 @@ std::ostream& operator<<(std::ostream& os, const Serializer_info_dump& val);
  *     of public APIs shm::Capnp_message_builder and shm::Capnp_message_reader (which themselves implement key
  *     interfaces `capnp::MessageBuilder` and `capnp::MessageReader`, respectively, in capnp's lower serialization
  *     layer).
- *   - struc::shm::rpc is an *alternative to* ipc::struc::Channel (+ Msg_out, Msg_in).  The doc header for
+ *   - struc::shm::rpc is an *alternative to* ipc::struc::Channel (+ struc::Msg_out, struc::Msg_in).  The doc header for
  *     ipc::struc::Channel, at the top, briefly contrasts itself versus us (pros/cons).
  *
  * XXX: How to use it!  capnp-RPC brief explainer!  Etc.
@@ -317,7 +317,7 @@ using Rpc_conn = capnp::TwoPartyVatNetworkBase::Connection;
  * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
  * we did with Session_vat_network et al), this might be helpful.
  */
-using Msg_out = capnp::OutgoingRpcMessage;
+using Rpc_msg_out = capnp::OutgoingRpcMessage;
 
 /**
  * Flow-IPC-styled alias for an in-message received by an #Rpc_conn.
@@ -325,7 +325,7 @@ using Msg_out = capnp::OutgoingRpcMessage;
  * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
  * we did with Session_vat_network et al), this might be helpful.
  */
-using Msg_in = capnp::IncomingRpcMessage;
+using Rpc_msg_in = capnp::IncomingRpcMessage;
 
 /**
  * Flow-IPC-styled alias for the node ID in a Session_vat_network or `TwoPartyVatNetwork`: namely an enumeration
