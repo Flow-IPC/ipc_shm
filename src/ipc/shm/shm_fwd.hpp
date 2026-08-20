@@ -108,6 +108,7 @@
  *   - Process 1 does not write to (or at least does not allocate in) a pool managed by process 2; and vice versa.
  *     Hence if process X goes down or is ill, the arenas created by the other processes in the system can continue
  *     safely.
+ *
  * The negatives are a large increase in complexity and novelty; and possible risks of sporadically increased latency
  * when SHM-allocating (as, internally, SHM-pool collections must be synchronized across session-connected processes)
  * and during setup (as, during the initial arena-lend one may need to communicate a large built-up SHM-pool

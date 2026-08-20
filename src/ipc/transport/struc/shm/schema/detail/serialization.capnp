@@ -37,6 +37,9 @@ $Cxx.namespace("ipc::transport::struc::shm::schema::detail");
 # SHM-stored segments (word arrays), allocated as needed when preceding segment runs out of space inside
 # a mutating capnp-generated mutator call by the user, namely when they're mutating the contents of the out-message
 # they want to send soon-enough.
+#
+# For the optional capnp-RPC layer (ipc::transport::struc::shm::rpc) the schema centers on
+# struct CapnpRpcMsgTopSerialization.
 
 # --- END Header.
 
@@ -62,4 +65,27 @@ struct ShmTopSerialization
   # For info on serializing the list<Blob> into ShmHandle and deserializing from Shm_handle to list<Blob>,
   # see Common.ShmHandle.  The bottom line is, this ShmHandle will be a mere small blob regardless of how
   # huge/complex the list<Blob>-serialized data structure is.
+}
+
+struct CapnpRpcMsgTopSerialization
+{
+  # See Session_vat_network.
+
+  shmTopSerialization @0 :ShmTopSerialization;
+  # The star of the show as usual.  The handle is to the in-SHM serialization of messages created and used by
+  # capnp::RpcSystem et al.  We usually don't rely on the following fact, except (and this is rare) for cross-layer
+  # optimization purposes and for exposition.  The fact: the schema encoded in that in-SHM message is
+  # capnp's internal rpc::Message.
+
+  isShortLivedMsg @1 :Bool = true;
+  # Helps implement the TwoPartyVatNetwork-inspired/compatible short-lived-message optimization;
+  # Session_vat_network internally uses (see comments in e.g. ctor) this.  `true` means the rpc::Message
+  # in shmTopSerialization is of a type such that it can be discarded completely before handling the next
+  # in-message; `false` means it cannot and may need to be stored.  (This has less impact in Session_vat_network
+  # than vanilla TwoPartyVatNetwork, as in our case the copying involved in "to be stored" is minimal -- just
+  # the SHM handle -- while the rpc::Message continues to sit quietly in SHM, never copied.  Nevertheless we
+  # figured might as well keep the optimization.)
+  #
+  # Not a huge deal but default to `true` simply because most messages *are* short-lived; so this needs to be touched
+  # relatively rarely to set it to non-default `false`.
 }

@@ -1053,7 +1053,7 @@ Pool_arena::Blob Pool_arena::lend_object(const Handle<T>& handle)
                  "IPC-transmission: Owning process-count incremented to [" << new_owner_ct << "] "
                  "(may change concurrently).  "
                  "Handle points to SHM-offset [" << offset_from_pool_base << "] (serialized).  Serialized contents are "
-                 "[" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
+                 "[\n" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
 
   { // Stats.
     auto& arena_stats = *m_arena_metadata; // Just for expressiveness.
@@ -1127,7 +1127,7 @@ Pool_arena::Handle<T> Pool_arena::borrow_object(const Blob& serialization)
                  "constructing PID = [" << handle_state->m_cting_process_id << "]; "
                  "our PID = [" << m_own_process_id << "].  "
                  "Handle points to SHM-offset [" << offset_from_pool_base << "] (deserialized).  Serialized "
-                 "contents are [" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
+                 "contents are [\n" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
 
   { // Stats.
     auto& arena_stats = *m_arena_metadata; // Just for expressiveness.

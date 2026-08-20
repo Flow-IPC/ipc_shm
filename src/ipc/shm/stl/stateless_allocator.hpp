@@ -47,11 +47,11 @@ namespace ipc::shm::stl
  *   using Widget_list = list<Widget, Shm_classic_allocator<Widget>>;
  *   using Widget_list_vec = vector<Widget_list, Shm_classic_allocator<Widget_list>>;
  *
- *   Shm_classic_arena a(...); // Let `a` be a SHM-classic arena storing *x among other things.
+ *   Shm_classic_arena a{...}; // Let `a` be a SHM-classic arena storing *x among other things.
  *
  *   Widget_list_vec* x = // ...obtain pointer x to SHM-stored space for the Widget_list_vec in question.
  *   {
- *     Shm_classic_arena_activator arena_ctx(&a);
+ *     Shm_classic_arena_activator arena_ctx{&a};
  *     // call x-> ctors, dtor, methods, operators....
  *   } // Return the active arena to previous value.
  *   ~~~
@@ -76,19 +76,19 @@ namespace ipc::shm::stl
  *     locally-dereferenceable before passing it to this method).
  *   - `template<typename T> class Pointer`: `Pointer<T>` must, informally speaking, mimic `T*`; formally
  *     being a *fancy pointer* in the STL sense.  The locally-dereferenceable `T*` it yields must point to the
- *     same underlying area in SHM regardless of in which `Arena`-aware process the deref API is invoked.
+ *     same underlying area in SHM regardless of which `Arena`-aware process the deref API is invoked.
  *     - The `class` keyword is for exposition only; it can also be `using`, `typedef`, or anything else,
  *       provided it mimics `T*` as described.
  *     - For example, if #Arena_obj is classic::Pool_arena, then classic::Pool_arena::Pointer might be
  *       `bipc::offset_ptr`, which internally stores merely an offset within the same SHM-pool versus its own
- *       `this`; this works great as long indeed the `Pointer` *itself* is located inside the SHM-pool as the
+ *       `this`; this works great as long indeed the `Pointer` *itself* is located inside the same SHM-pool as the
  *       thing to which it points.
  *
  * @todo Currently `Arena::Pointer` shall be a fancy-pointer, but we could support raw pointers also.  Suppose
  * #Arena_obj is set up in such a way as to map all processes' locally-dereferenceable pointers to the same SHM
  * location to the same numeric value (by specifying each pool's start as some predetermined numerical value in
- * the huge 64-bit vaddr space -- in all processes sharing that SHM pool.  Now no address translation is
- * needed, and `Arena::Pointer` could be simply `T*`.  As of this writing some inner impl details suppose
+ * the huge 64-bit vaddr space) in all processes sharing that SHM pool.  Now no address translation is
+ * needed, and `Arena::Pointer` could be simply `T*`.  As of this writing some inner impl details assume
  * it being a fancy-pointer, and it's the only active need we have; but that could be tweaked with a bit of effort.
  *
  * ### Use in read-only borrowing mode ###
