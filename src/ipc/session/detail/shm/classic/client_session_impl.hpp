@@ -47,10 +47,10 @@ namespace ipc::session::shm::classic
  * @tparam Mdt_payload
  *         See shm::classic::Client_session counterpart.
  */
-template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 class Client_session_impl :
   public Session_impl<session::Client_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload,
-                                                   schema::ShmType::CLASSIC>>
+                                                   session::schema::ShmType::CLASSIC>>
 {
 public:
   // Types.
@@ -58,7 +58,7 @@ public:
   /// Short-hand for our non-`virtual` base.
   using Base = Session_impl
                  <session::Client_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload,
-                                               schema::ShmType::CLASSIC>>;
+                                               session::schema::ShmType::CLASSIC>>;
 
   // Constructors/destructor.
 
@@ -141,7 +141,7 @@ private:
 
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define TEMPLATE_CLSC_CLI_SESSION_IMPL \
-  template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+  template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define CLASS_CLSC_CLI_SESSION_IMPL \
   Client_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>

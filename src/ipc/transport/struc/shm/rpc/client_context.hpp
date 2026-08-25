@@ -579,8 +579,6 @@ bool Client_context<Client_session_t>::sync_connect_impl
       // else
       local_hndl = Native_handle{local_sock.release()};
       remote_hndl = Native_handle{remote_sock.release()};
-      /* (Caution: _sock.release() and _hndl.release() (seen below) are very different things.  Both conceptually
-       * nullify their objects, but _sock.release() *returns* the handle; while _hndl.relase() *closes* the handle.) */
     }
 
     {
@@ -602,7 +600,7 @@ bool Client_context<Client_session_t>::sync_connect_impl
 
       /* Sent: the other side has (or on its schedule will have) its own copy of the handle;
        * our copy has done its job; close it (descriptor/handle goes away; description/kernel endpoint lives). */
-      remote_hndl.release();
+      remote_hndl.close();
 
       /* The channel endpoint (reminder: of the channel we used to transmit remote_hndl, which is half of
        * capnp-RPC transmission-pipe socket-pair) itself, however, we deliberately keep around
@@ -698,8 +696,8 @@ bool Client_context<Client_session_t>::sync_connect_impl
     /* Close whatever socket-pair handles remain in our custody (each of these no-ops on null handle;
      * in particular Session_vat_network ctor -- if reached -- consumes (nullifies) local_hndl immediately;
      * in any case we cannot double-close no matter when it threw). */
-    remote_hndl.release();
-    local_hndl.release();
+    remote_hndl.close();
+    local_hndl.close();
     m_rpc_setup_channel.reset(); // Get this back to pristine state too.
 
     m_session = Session_obj{get_logger(), m_cli_app_ref, m_srv_app_ref,

@@ -68,7 +68,7 @@ namespace ipc::session::shm::classic
  * @tparam Mdt_payload
  *         See vanilla #Session_server.
  */
-template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 class Session_server :
   private Session_server_impl // Attn!  Emit `shm::classic::Server_session`s (impl customization point).
             <Session_server<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>,
@@ -419,7 +419,7 @@ private:
    * What it returns is a pointer (always the same one) to the segregated SHM-arena pertaining to
    * all sessions (current and future) pertaining to `app` in `*this` server.  On success returns
    * falsy #Error_code.  Success means either `app_shm(app)` was already going to return non-null,
-   * or it wasn't, but we successfuly made it so it will.
+   * or it wasn't, but we successfully made it so it will.
    *
    * On failure to set this up:
    *   - Truthy #Error_code reason for failure is returned.
@@ -476,7 +476,7 @@ private:
 
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define TEMPLATE_CLSC_SESSION_SRV \
-  template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+  template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define CLASS_CLSC_SESSION_SRV \
   Session_server<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>

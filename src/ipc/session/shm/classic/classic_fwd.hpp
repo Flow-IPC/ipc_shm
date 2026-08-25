@@ -35,10 +35,10 @@ namespace ipc::session::shm::classic // See also ipc::session::shm::classic::rpc
 template<typename Session_t>
 class Session_mv;
 
-template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
 class Server_session;
 
-template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
 class Session_server;
 
 /**
@@ -91,7 +91,7 @@ class Session_server;
  * @tparam Mdt_payload
  *         Identical to session::Client_session.
  */
-template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
 using Client_session
   = Session_mv
       <session::Client_session_mv
@@ -124,7 +124,7 @@ std::ostream& operator<<(std::ostream& os, const Session_mv<Session_t>& val);
  *        Object to serialize.
  * @return `os`.
  */
-template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES,
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES,
          typename Mdt_payload>
 std::ostream& operator<<(std::ostream& os,
                          const Server_session
@@ -141,7 +141,7 @@ std::ostream& operator<<(std::ostream& os,
  *        Object to serialize.
  * @return `os`.
  */
-template<schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES,
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES,
          typename Mdt_payload>
 std::ostream& operator<<(std::ostream& os,
                          const Session_server
@@ -179,7 +179,7 @@ namespace ipc::session::shm::classic::rpc
  *   - An additional MQ-based pipe *might* be useful for user's side channels (if any), so `NONE` is default, but
  *     they can choose an actual MQ type instead.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE = schema::MqType::NONE>
+template<session::schema::MqType S_MQ_TYPE_OR_NONE = session::schema::MqType::NONE>
 using Client_session = classic::Client_session<S_MQ_TYPE_OR_NONE, true>;
 
 /**
@@ -190,7 +190,7 @@ using Client_session = classic::Client_session<S_MQ_TYPE_OR_NONE, true>;
  * @tparam S_MQ_TYPE_OR_NONE
  *         See #Client_session.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE = schema::MqType::NONE>
+template<session::schema::MqType S_MQ_TYPE_OR_NONE = session::schema::MqType::NONE>
 using Session_server = classic::Session_server<S_MQ_TYPE_OR_NONE, true>;
 
 /**
@@ -200,7 +200,7 @@ using Session_server = classic::Session_server<S_MQ_TYPE_OR_NONE, true>;
  * @tparam S_MQ_TYPE_OR_NONE
  *         See #Client_session.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE = schema::MqType::NONE>
+template<session::schema::MqType S_MQ_TYPE_OR_NONE = session::schema::MqType::NONE>
 using Server_session = classic::Server_session<S_MQ_TYPE_OR_NONE, true>;
 
 } // namespace ipc::session::shm::classic::rpc
