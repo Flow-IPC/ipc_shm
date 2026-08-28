@@ -18,12 +18,14 @@
 /// @file
 #pragma once
 
-#include "ipc/transport/struc/shm/shm_fwd.hpp"
+#include "ipc/transport/struc/shm/rpc/rpc_fwd.hpp"
 #include "ipc/transport/struc/shm/capnp_msg_builder.hpp"
 #include "ipc/transport/struc/shm/serializer.hpp"
 #include "ipc/transport/struc/util.hpp"
 #include <boost/move/unique_ptr.hpp>
 #include <capnp/any.h>
+#include <capnp/rpc-twoparty.h>
+#include <capnp/rpc.capnp.h>
 #include <flow/log/log.hpp>
 #include <optional>
 
@@ -31,6 +33,54 @@ namespace ipc::transport::struc::shm::rpc
 {
 
 // Types.
+
+/* The following capnp-related aliases would normally live in rpc_fwd.hpp; but capnp ships no _fwd.hpp
+ * counterparts of its own, so it was a choice between hand-forward-declaring capnp types there (fragile
+ * against upstream changes; and impossible for Rpc_conn, which aliases a *nested* class) and placing the
+ * aliases here, where the capnp-RPC headers are included anyway.  Hence: here. */
+
+/**
+ * Flow-IPC-styled alias for Session_vat_network and `TwoPartyVatNetwork`'s "connection," which is
+ * an interface for essentially an RPC-oriented stream of capnp messages -- a relatively thin layer on
+ * top of the `capnp::MessageStream` interface.  The latter is a general stream of capnp messages.
+ * Incidentally `capnp::MessageStream` is something like capnp's version of our transport::struc::Channel.
+ *
+ * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
+ * we did with Session_vat_network et al), this might be helpful.
+ */
+using Rpc_conn = capnp::TwoPartyVatNetworkBase::Connection;
+
+/**
+ * Flow-IPC-styled alias for an out-message sent by an #Rpc_conn.
+ *
+ * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
+ * we did with Session_vat_network et al), this might be helpful.
+ */
+using Rpc_msg_out = capnp::OutgoingRpcMessage;
+
+/**
+ * Flow-IPC-styled alias for an in-message received by an #Rpc_conn.
+ *
+ * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
+ * we did with Session_vat_network et al), this might be helpful.
+ */
+using Rpc_msg_in = capnp::IncomingRpcMessage;
+
+/**
+ * Flow-IPC-styled alias for the node ID in a Session_vat_network or `TwoPartyVatNetwork`: namely an enumeration
+ * containing `SERVER` and `CLIENT`.
+ *
+ * Incidentally we remind you: Much like in ipc::Session the server-vs-client dichotomy carries no meaning, once
+ * a session is established (is in PEER state), similarly by-and-large this ID is just a node ID.  A server
+ * can do client-like things and vice versa... etc.
+ *
+ * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
+ * we did with Session_vat_network et al), this might be helpful.
+ */
+using Vat_id = capnp::rpc::twoparty::VatId;
+
+/// Concrete `capnp::RpcSystem` to be used with Session_vat_network or `TwoPartyVatNetwork`.
+using Rpc_system = capnp::RpcSystem<Vat_id>;
 
 /// Non-template base for Session_vat_network (constants, types and what-not).
 struct Session_vat_network_base

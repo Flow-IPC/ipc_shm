@@ -40,7 +40,7 @@ public:
    * A message of this size will be able to completely contain the (single) segment emitted by
    * Builder::emit_serialization() no matter how large or complex the user data loaded into
    * Builder::payload_msg_builder().  This value is safely large enough yet also is tight (small) enough
-   * to avoid waisting RAM or cycles when allocating messages that would store these segments.
+   * to avoid wasting RAM or cycles when allocating messages that would store these segments.
    *
    * @internal
    * This number should be enough to definitely fit any transported blob returned by any
@@ -137,13 +137,13 @@ public:
    * Implements Struct_builder::Config sub-concept.  In this impl: The knobs (`m_logger_ptr` aside) control
    * either the outer serialization (in heap) or the inner serialization (in SHM).  Regarding the latter there
    * is as of this writing: #m_segment_sz_init which indicates the size of the initial capnp-segment in
-   * SHM (where user-specified capnp-data are serialized; and #m_arena.  Explanation of that one:
+   * SHM (where user-specified capnp-data are serialized); and #m_arena.  Explanation of that one:
    * `Builder` ctor configured by `Config` creates builder that shall SHM-allocate segments of internally determined
    * sizes subsequently.  The SHM provider is to be supplied to this ctor via #m_arena arg;
    * see class doc header for requirements and background.  (The simplest available setup would
    * let #Arena = ipc::shm::classic::Pool_arena; with #m_arena = some pre-opened `Pool_arena`.)
    *
-   * As for the former (outer serialization knobs), consistently with Struct_builder::Cofig concept requirements:
+   * As for the former (outer serialization knobs), consistently with Struct_builder::Config concept requirements:
    *   - Since the serialization in heap (outer serialization) we by definition always produce 1, small capnp-segment
    *     (with a SHM handle only), there is no need for a `m_seg_and_frame_sz_cap`.
    *   - So that leaves only #m_frame_prefix_sz which is always required.
@@ -300,7 +300,7 @@ private:
    * while user mutates via payload_msg_builder().  This is the bottom-serialization builder.
    *
    * As explained at the top of the class doc header, this one uses a segment-sizing strategy similar
-   * that of `capnp::MallocMessageBuilder` operating in `GROW_HEURISTICALLY` mode.  I.e., it'll start with
+   * to that of `capnp::MallocMessageBuilder` operating in `GROW_HEURISTICALLY` mode.  I.e., it'll start with
    * a reasonable guess for segment 1 size; then grow exponentially each time a new segment is requested.
    * More or less, each new segment's size equals that of the preceding segments' sizes added up.
    */
@@ -447,8 +447,8 @@ public:
    *        or somehow opposing builder serialized an empty segment list -- this would be a bug on their part),
    *        struc::error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED (add_serialization_segment()-returned segment
    *        was modified subsequently to start at a misaligned address; or somehow the opposing
-   *        builder supplied a segment that starts at a misaligned address -- this would be a bug on their
-   *        part),
+   *        builder supplied a segment that starts at a misaligned address or has a non-word-multiple size --
+   *        this would be a bug on their part),
    *        error::Code::S_DESERIALIZE_FAILED_REASSEMBLY_FAILED (`split_segs_always_null` was not null),
    *        error::Code::S_DESERIALIZE_FAILED_SESSION_HOSED (the SHM-session was unable to determine the location
    *        of the serialization in SHM, because its `borrow_object()` method indicated the session is down, or the

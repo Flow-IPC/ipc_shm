@@ -47,7 +47,7 @@ public:
   const char* name() const noexcept override;
 
   /**
-   * Analogous to transport::error::Category::name().
+   * Analogous to transport::error::Category::message().
    *
    * @param val
    *        See above.
@@ -56,7 +56,7 @@ public:
   std::string message(int val) const override;
 
   /**
-   * Analogous to transport::error::Category::name().
+   * Analogous to transport::error::Category::code_symbol().
    * @param code
    *        See above.
    * @return See above.

@@ -60,8 +60,8 @@ namespace ipc::transport::struc::shm
  *
  * ### Move-ctible and move-assignable ###
  * Please see similar section in Heap_fixed_builder_capnp_message_builder doc header; it applies
- * very similarly to us.  Spoiler alert: A move-from involves copying 200+ bytes; consider wrapping `*this`
- * in a `unique_ptr` if moving `*this`.
+ * very similarly to us.  Spoiler alert: the super-class is not movable (hence neither are we); wrap `*this`
+ * in a `unique_ptr` if it must be relocatable (shm::Builder does exactly that).
  *
  * @tparam Shm_arena
  *         See shm::Builder doc header, same spot.
@@ -179,7 +179,7 @@ public:
    *         must exist; and those two methods -- and the actual args `shm_session` to our `lend()` and
    *         to opposing Capnp_message_reader::borrow() -- must interoperate.  In particular here are `S1 + S2`
    *         pairs that work (this may not be exhaustive).  Caution: Mixing `S1` from one pair with `S2` from another
-   *         is undefined behavior.  (In practice in will work in some cases and will reliably fail in others, even
+   *         is undefined behavior.  (In practice it will work in some cases and will reliably fail in others, even
    *         when the implied SHM-provider is the same; e.g. session::shm::classic::Client_session + shm::Pool_arena.)
    *         Here are the aforementioned pairs available out of the box:
    *         session::shm::classic::Client_session + session::shm::classic::Server_session;
@@ -340,7 +340,7 @@ public:
    * notably `.getRoot<...>()` -- to access the SHM-stored data.
    *
    * @todo Would be nice to provide a more-general counterpart to existing
-   * Capnp_message_reader::borrow() (in addition to that one which interpreats a SHM-handle-endcoding capnp structure),
+   * Capnp_message_reader::borrow() (in addition to that one which interprets a SHM-handle-encoding capnp structure),
    * such as one that takes a mere `Blob`.  The existing one is suitable for the main use-case which is internally by
    * shm::Reader; but Capnp_message_reader is also usable as a `capnp::MessageReader` directly.  If a user were to
    * indeed leverage it in that latter capacity, they may want to transmit/store the SHM-handle some other way.
@@ -359,8 +359,8 @@ public:
    *        or somehow opposing builder serialized an empty segment list -- this would be a bug on their part),
    *        struc::error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED (add_serialization_segment()-returned segment
    *        was modified subsequently to start at a misaligned address; or somehow the opposing
-   *        builder supplied a segment that starts at a misaligned address -- this would be a bug on their
-   *        part),
+   *        builder supplied a segment that starts at a misaligned address or has a non-word-multiple size --
+   *        this would be a bug on their part),
    *        error::Code::S_DESERIALIZE_FAILED_SESSION_HOSED (the SHM-session was unable to determine the location
    *        of the serialization in SHM, because its `borrow_object()` method indicated the session is down, or the
    *        information transmitted over IPC was in some way invalid).
@@ -653,11 +653,11 @@ kj::ArrayPtr<::capnp::word>
      * (e.g., calloc(64Ki) we've seen be ~20% faster than malloc() + memset()).
      *
      * @todo That said: in our case (where the allocator is SHM-aware) Basic_blob will be (as of this writing;
-     * see Basic_blob::reserve_impl()) forced to internaly separately allocate-then-memset-zeroes, meaning it's mere
+     * see Basic_blob::reserve_impl()) forced to internally separately allocate-then-memset-zeroes, meaning it's mere
      * syntactic sugar in that case.  There are as of this writing some notes there about how we might, for
-     * SHM-classic and SHM-jemalloc specificaly even, be able to do better here: perhaps by somehow triggering
+     * SHM-classic and SHM-jemalloc specifically even, be able to do better here: perhaps by somehow triggering
      * <relevant allocator>::allocate() to in fact alloc-and-clear to the best of the SHM-provider's ability.
-     * So see those notes in Basic_blob::reserver_impl() and come back to Flow-IPC-land to see what we might do
+     * So see those notes in Basic_blob::reserve_impl() and come back to Flow-IPC-land to see what we might do
      * for a perf bump here.
      *
      * Caution!  If you choose to change-over to vector<..., util::Default_init_allocator<...>> instead, then
@@ -865,15 +865,15 @@ void Capnp_message_reader<Shm_arena>::borrow
     const uint8_t* data_ptr = &(serialization_segment.front());
     const size_t seg_size = serialization_segment.size();
 
-    if ((uintptr_t(data_ptr) % sizeof(void*)) != 0)
+    if (((uintptr_t(data_ptr) % sizeof(word)) != 0) || ((seg_size % sizeof(word)) != 0))
     {
       FLOW_LOG_WARNING("SHM reader [" << *this << "]: "
                        "Serialization segment [" << idx << "] "
                        "(0-based, of [" << serialization_segments.size() << "], 1-based): "
                        "SHM-heap buffer @[" << static_cast<const void*>(data_ptr) << "] sized [" << seg_size << "]: "
-                       "Starting pointer is not this-architecture-word-aligned.  Bug?  "
+                       "Starting pointer is not capnp-word-aligned, and/or size is not a capnp-word-multiple.  Bug?  "
                        "Misuse of Capnp_message_reader?  Other side misbehaved?  "
-                       "Misalignment is against the API use requirements; capnp would complain and fail.");
+                       "Either is against the API use requirements; capnp would complain and fail.");
       *err_code = struc::error::Code::S_DESERIALIZE_FAILED_SEGMENT_MISALIGNED;
       capnp_segs.clear();
       m_btm_serialization_shm_handle.reset();
@@ -890,7 +890,7 @@ void Capnp_message_reader<Shm_arena>::borrow
                   "[\n" << buffers_dump_string(Blob_const{data_ptr, seg_size}, "  ") << "].");
 
     capnp_segs.emplace_back(reinterpret_cast<const word*>(data_ptr),
-                            seg_size / sizeof(word)); // @todo Maybe also check that seg_size = a multiple?  assert()?
+                            seg_size / sizeof(word)); // (An exact multiple: the size check above ensured it.)
 
     ++idx;
   } // for (const auto& serialization_segment : serialization_segments)

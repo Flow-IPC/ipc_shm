@@ -21,6 +21,7 @@
 #include "ipc/shm/classic/classic.hpp"
 #include "ipc/shm/stl/stateless_allocator.hpp"
 #include "ipc/transport/struc/shm/shm_fwd.hpp"
+#include "ipc/transport/struc/shm/rpc/rpc_fwd.hpp"
 #include "ipc/transport/transport_fwd.hpp"
 
 namespace ipc::session::shm::classic
