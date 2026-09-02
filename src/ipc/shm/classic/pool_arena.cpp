@@ -213,8 +213,6 @@ bool Pool_arena::is_addr_in_arena(const void* p) const
 {
   // Pre-requisite to this internal helper is: m_pool is non-null.
 
-  /* Let's use pure integer arithmetic to avoid a genius optimizer detecting formal undefined-behavior
-   * (pointers outside data structures) and generating surprising results. */
   const auto addr = reinterpret_cast<uintptr_t>(p);
   const auto pool_base = reinterpret_cast<uintptr_t>(m_pool->get_address());
   // Sidestep any (albeit very unlikely) wrap.

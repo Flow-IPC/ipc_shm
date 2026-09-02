@@ -29,6 +29,7 @@
 #include "ipc/util/detail/util.hpp"
 #include <flow/util/basic_blob.hpp>
 #include <flow/util/stat/stat_set.hpp>
+#include <flow/util/util.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 #include <boost/interprocess/indexes/flat_map_index.hpp>
 #include <cstdint>
@@ -938,8 +939,7 @@ bool Pool_arena::is_obj_in_arena(const T* obj) const
   }
   // else: First byte of obj is in range; hence ensure its last byte isn't past range's last byte.
 
-  /* The arithmetic and casts probably look odd, but it's the same reasoning as in is_addr_in_arena();
-   * use integer arithmetic only and avoid wraps via + while using known-non-negative-result subtractions. */
+  // As in is_addr_in_arena(); avoid wraps via + while using known-non-negative-result subtractions.
   return sizeof(T)
          <= (arena_size() - (reinterpret_cast<uintptr_t>(obj)
                              - reinterpret_cast<uintptr_t>(m_pool->get_address())));
@@ -952,6 +952,7 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
   using Shm_handle = Handle_in_shm<Value>;
   using flow::util::stat::fetch_add;
   using flow::util::stat::update_hi_wmark;
+  using flow::util::construct_at;
   using boost::shared_ptr;
 
   if (!m_pool)
@@ -962,7 +963,7 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
 
   const auto handle_state = static_cast<Shm_handle*>(allocate(sizeof(Shm_handle)));
   // Buffer acquired but uninitialized.  Construct the owner count to 1 (just us: no lend_object() yet).
-  util::construct_at(&handle_state->m_atomic_owner_ct, 1);
+  construct_at(&handle_state->m_atomic_owner_ct, 1);
   handle_state->m_cting_process_id = m_own_process_id; // Just a regular (immutable after this) integer.
   // Construct the T itself.  As advertised try to help out by setting selves as the current arena.
 
@@ -978,12 +979,12 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
    * on its behalf in any sane way; so that fits the bill. */
   if constexpr(std::is_trivially_destructible_v<Value>)
   {
-    util::construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
+    construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
   }
   else
   {
     Activator ctx{this};
-    util::construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
+    construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
   }
 
   { // Stats.

@@ -23,6 +23,8 @@
 #include "ipc/transport/struc/shm/rpc/context_server.hpp"
 #include "ipc/transport/struc/shm/rpc/client_context.hpp"
 #include "ipc/transport/struc/shm/rpc/detail/ez_rpc_kj_io.hpp"
+#include "ipc/transport/struc/msg.hpp"
+#include "ipc/util/util_fwd.hpp"
 #include <flow/log/log.hpp>
 #include <kj/async.h>
 #include <boost/move/unique_ptr.hpp>
@@ -453,20 +455,18 @@ template<typename Client_session_t>
 capnp::Capability::Client Ez_rpc_client<Client_session_t>::get_main()
 {
   /* This code in EzRpcClient was curiously optimized; I think maybe get_main() might be called frequently.
-   * So we left that in, even if the specifics are a tiny bit different stylistically (more Flow-ish). */
+   * So we left that in, even if the specifics are a tiny bit different (more Flow-ish and Flow-IPC-ish). */
 
+  using util::Blob_mutable;
+  using Word = capnp::word;
   using boost::array;
-  using capnp::MallocMessageBuilder;
-  using kj::ArrayPtr;
-  using capnp::word;
 
   // This magic number used for a tiny optimization is stolen from TwoPartyVatNetwork insides.
   constexpr size_t VAT_ID_SZ_WORDS = 4;
 
-  array<uint8_t, VAT_ID_SZ_WORDS * sizeof(word)> scratch;
-  scratch.assign(0);
-
-  MallocMessageBuilder message{ArrayPtr<word>{reinterpret_cast<word*>(scratch.data()), VAT_ID_SZ_WORDS}};
+  array<Word, VAT_ID_SZ_WORDS> scratch;
+  Capped_sz_capnp_message_builder message{Blob_mutable{scratch.data(), VAT_ID_SZ_WORDS * sizeof(Word)},
+                                          true}; // Gotta zero it for capnp; array<> lacks ctor and does not.
   auto host_id = message.getRoot<Vat_id>();
   host_id.setSide(capnp::rpc::twoparty::Side::SERVER);
 

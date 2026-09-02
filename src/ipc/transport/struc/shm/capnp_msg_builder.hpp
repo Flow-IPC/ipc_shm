@@ -28,6 +28,7 @@
 #include "ipc/transport/struc/shm/schema/detail/serialization.capnp.h"
 #include <flow/error/error.hpp>
 #include <boost/interprocess/containers/list.hpp>
+#include <cstdint>
 
 namespace ipc::transport::struc::shm
 {
@@ -862,15 +863,15 @@ void Capnp_message_reader<Shm_arena>::borrow
   size_t idx = 0;
   for (const auto& serialization_segment : serialization_segments) // Reminder: serialization_segment is a Basic_blob.
   {
-    const uint8_t* data_ptr = &(serialization_segment.front());
+    const void* data_ptr = &(serialization_segment.front());
     const size_t seg_size = serialization_segment.size();
 
-    if (((uintptr_t(data_ptr) % sizeof(word)) != 0) || ((seg_size % sizeof(word)) != 0))
+    if (((reinterpret_cast<uintptr_t>(data_ptr) % sizeof(word)) != 0) || ((seg_size % sizeof(word)) != 0))
     {
       FLOW_LOG_WARNING("SHM reader [" << *this << "]: "
                        "Serialization segment [" << idx << "] "
                        "(0-based, of [" << serialization_segments.size() << "], 1-based): "
-                       "SHM-heap buffer @[" << static_cast<const void*>(data_ptr) << "] sized [" << seg_size << "]: "
+                       "SHM-heap buffer @[" << data_ptr << "] sized [" << seg_size << "]: "
                        "Starting pointer is not capnp-word-aligned, and/or size is not a capnp-word-multiple.  Bug?  "
                        "Misuse of Capnp_message_reader?  Other side misbehaved?  "
                        "Either is against the API use requirements; capnp would complain and fail.");
@@ -884,12 +885,12 @@ void Capnp_message_reader<Shm_arena>::borrow
     FLOW_LOG_TRACE("SHM reader [" << *this << "]: "
                    "Serialization segment [" << idx << "] "
                    "(0-based, of [" << serialization_segments.size() << "], 1-based): "
-                   "SHM-heap buffer @[" << static_cast<const void*>(data_ptr) << "] sized [" << seg_size << "]: "
+                   "SHM-heap buffer @[" << data_ptr << "] sized [" << seg_size << "]: "
                    "Feeding into capnp deserialization engine.");
     FLOW_LOG_DATA("Segment contents: "
                   "[\n" << buffers_dump_string(Blob_const{data_ptr, seg_size}, "  ") << "].");
 
-    capnp_segs.emplace_back(reinterpret_cast<const word*>(data_ptr),
+    capnp_segs.emplace_back(static_cast<const word*>(data_ptr),
                             seg_size / sizeof(word)); // (An exact multiple: the size check above ensured it.)
 
     ++idx;
