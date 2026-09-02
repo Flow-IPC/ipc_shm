@@ -952,7 +952,7 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
   using Shm_handle = Handle_in_shm<Value>;
   using flow::util::stat::fetch_add;
   using flow::util::stat::update_hi_wmark;
-  using flow::util::construct_at;
+  // using flow::util::construct_at; // C++20 => can conflict with incidentally included std:: counterpart.
   using boost::shared_ptr;
 
   if (!m_pool)
@@ -963,7 +963,7 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
 
   const auto handle_state = static_cast<Shm_handle*>(allocate(sizeof(Shm_handle)));
   // Buffer acquired but uninitialized.  Construct the owner count to 1 (just us: no lend_object() yet).
-  construct_at(&handle_state->m_atomic_owner_ct, 1);
+  flow::util::construct_at(&handle_state->m_atomic_owner_ct, 1);
   handle_state->m_cting_process_id = m_own_process_id; // Just a regular (immutable after this) integer.
   // Construct the T itself.  As advertised try to help out by setting selves as the current arena.
 
@@ -979,12 +979,12 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
    * on its behalf in any sane way; so that fits the bill. */
   if constexpr(std::is_trivially_destructible_v<Value>)
   {
-    construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
+    flow::util::construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
   }
   else
   {
     Activator ctx{this};
-    construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
+    flow::util::construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
   }
 
   { // Stats.
