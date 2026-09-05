@@ -413,6 +413,10 @@ private:
   /**
    * Data-less facade for Server_context, so that we can access its non-`public` ctor during the accept()
    * procedure.
+   *
+   * XXXthis was written before I saw the light against doing the protected+facade thing and for instead doing
+   * an attorney thing. E.g., Msg_in_impl = attorney of Msg_in. So do that here. Worst-case, make it @todo.
+   * capnp-RPC hasn't been merged yet, so all else being equal now>later.
    */
   class Server_context_impl : public Server_context_obj
   {
@@ -535,6 +539,10 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
     typename Channels::value_type::Async_io_obj m_chan;
     Native_handle m_hndl;
     uint8_t m_protocol_dummy_payload;
+
+    /* If the continuation below never consumed m_hndl (canceled; or threw first), it is ours to close.
+     * m_chan must die first: its thread is what writes m_hndl. */
+    ~Transport_hndl_receive() { m_chan = decltype(m_chan){}; m_hndl.close(); }
   };
 
   // We are in thread U.

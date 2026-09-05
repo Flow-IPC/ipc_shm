@@ -22,6 +22,7 @@
 #include "ipc/transport/struc/shm/capnp_msg_builder.hpp"
 #include "ipc/transport/struc/shm/serializer.hpp"
 #include "ipc/transport/struc/util.hpp"
+#include "ipc/util/native_handle.hpp"
 #include <boost/move/unique_ptr.hpp>
 #include <capnp/any.h>
 #include <capnp/rpc-twoparty.h>
@@ -1133,11 +1134,13 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   using capnp::ReaderOptions;
   using kj::newPromiseAndFulfiller;
   using boost::movelib::make_unique;
+  using util::Own_native_handle;
+  using util::disowned_native_handle;
 
-  /* First things first: deterministically consume (nullify) bidir_transport.  From here on -- including if
-   * something below throws, namely the kj wrap[Unix]SocketFd() calls -- the handle is never again the caller's
-   * to close.  (Native_handle move ctor nullifies the source.)  This is our advertised ctor contract. */
-  auto bidir_transport_hndl = std::move(bidir_transport);
+  /* First things first: deterministically consume (nullify) bidir_transport, into an auto-closer.  From here on
+   * -- including if something below throws -- the handle is never again the caller's to close: it is ours, until
+   * kj takes ownership in wrap[Unix]SocketFd() below.  This is our advertised ctor contract. */
+  Own_native_handle bidir_transport_hndl{std::move(bidir_transport)};
   assert(bidir_transport.null());
 
   assert((bool(m_shm_lnd_brw) == bool(m_shm_arena)) && "Either specify neither or both; just one is weird.");
@@ -1148,7 +1151,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
                   "node ID [srv_else_cli=" << m_srv_else_cli << "], "
                   "session/SHM session/borrower-lender [" << *m_shm_lnd_brw << "], "
                   "SHM arena [" << *m_shm_arena << "], "
-                  "bidirectional byte transport native-handle [" << bidir_transport_hndl << "], "
+                  "bidirectional byte transport native-handle [" << bidir_transport_hndl.get() << "], "
                   "in-FD count limit (0 = do not transmit native handles) = [" << hndl_transport_limit_or_0 << "].");
   }
   else
@@ -1156,7 +1159,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
     FLOW_LOG_INFO("Session_vat_network [" << *this << "]: Constructing Session_vat_network: "
                   "degenerate mode -- no zero-copy enabled -- will be identical to regular TwoPartyVatNetwork; "
                   "node ID [srv_else_cli=" << m_srv_else_cli << "], "
-                  "bidirectional byte transport native-handle [" << bidir_transport_hndl << "], "
+                  "bidirectional byte transport native-handle [" << bidir_transport_hndl.get() << "], "
                   "in-FD count limit (0 = do not transmit native handles) = [" << hndl_transport_limit_or_0 << "].");
   }
 
@@ -1211,8 +1214,8 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   if (hndl_transport_limit_or_0 == 0)
   {
     // Create non-FD-passing vanilla AsyncIoStream and use the TwoPartyVatNetwork ctor that takes such accordingly.
-    m_kj_stream_of_blobs
-      = m_kj_io->lowLevelProvider->wrapSocketFd(bidir_transport_hndl.m_native_handle,
+    m_kj_stream_of_blobs // (Per the TAKE_OWNERSHIP flag kj owns the handle from this call on; so release ours here.)
+      = m_kj_io->lowLevelProvider->wrapSocketFd(disowned_native_handle(std::move(bidir_transport_hndl)).m_native_handle,
                                                 kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP);
     m_capnp_msg_stream = make_unique<BufferedMessageStream>(*m_kj_stream_of_blobs,
                                                             std::move(is_short_lived_msg_func));
@@ -1225,8 +1228,9 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   {
     /* Create FD-passing AsyncCapabilityStream and use the TwoPartyVatNetwork ctor that takes such (plus in-FD limit)
      * accordingly. */
-    m_kj_stream_of_blobs_hndls
-      = m_kj_io->lowLevelProvider->wrapUnixSocketFd(bidir_transport_hndl.m_native_handle,
+    m_kj_stream_of_blobs_hndls // (Release ours here, as above.)
+      = m_kj_io->lowLevelProvider->wrapUnixSocketFd(disowned_native_handle(std::move(bidir_transport_hndl))
+                                                      .m_native_handle,
                                                     kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP);
     m_capnp_msg_stream = make_unique<BufferedMessageStream>(*m_kj_stream_of_blobs_hndls,
                                                             std::move(is_short_lived_msg_func));
