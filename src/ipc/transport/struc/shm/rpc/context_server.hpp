@@ -415,7 +415,7 @@ private:
    * procedure.
    *
    * XXXthis was written before I saw the light against doing the protected+facade thing and for instead doing
-   * an attorney thing. E.g., Msg_in_impl = attorney of Msg_in. So do that here. Worst-case, make it @todo.
+   * an attorney thing. E.g., Msg_in_impl = attorney of Msg_in. So do that here. Worst-case, make it a `@todo`.
    * capnp-RPC hasn't been merged yet, so all else being equal now>later.
    */
   class Server_context_impl : public Server_context_obj
