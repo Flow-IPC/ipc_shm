@@ -26,6 +26,7 @@
 #include <boost/move/unique_ptr.hpp>
 #include <capnp/any.h>
 #include <capnp/rpc-twoparty.h>
+#include <capnp/rpc.h>
 #include <capnp/rpc.capnp.h>
 #include <flow/log/log.hpp>
 #include <optional>
@@ -35,10 +36,7 @@ namespace ipc::transport::struc::shm::rpc
 
 // Types.
 
-/* The following capnp-related aliases would normally live in rpc_fwd.hpp; but capnp ships no _fwd.hpp
- * counterparts of its own, so it was a choice between hand-forward-declaring capnp types there (fragile
- * against upstream changes; and impossible for Rpc_conn, which aliases a *nested* class) and placing the
- * aliases here, where the capnp-RPC headers are included anyway.  Hence: here. */
+// rpc_fwd.hpp comment explains why these aliases are here and not, as is otherwise typical, there.
 
 /**
  * Flow-IPC-styled alias for Session_vat_network and `TwoPartyVatNetwork`'s "connection," which is
@@ -49,7 +47,7 @@ namespace ipc::transport::struc::shm::rpc
  * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
  * we did with Session_vat_network et al), this might be helpful.
  */
-using Rpc_conn = capnp::TwoPartyVatNetworkBase::Connection;
+using Rpc_conn = ::capnp::TwoPartyVatNetworkBase::Connection;
 
 /**
  * Flow-IPC-styled alias for an out-message sent by an #Rpc_conn.
@@ -57,7 +55,7 @@ using Rpc_conn = capnp::TwoPartyVatNetworkBase::Connection;
  * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
  * we did with Session_vat_network et al), this might be helpful.
  */
-using Rpc_msg_out = capnp::OutgoingRpcMessage;
+using Rpc_msg_out = ::capnp::OutgoingRpcMessage;
 
 /**
  * Flow-IPC-styled alias for an in-message received by an #Rpc_conn.
@@ -65,7 +63,7 @@ using Rpc_msg_out = capnp::OutgoingRpcMessage;
  * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
  * we did with Session_vat_network et al), this might be helpful.
  */
-using Rpc_msg_in = capnp::IncomingRpcMessage;
+using Rpc_msg_in = ::capnp::IncomingRpcMessage;
 
 /**
  * Flow-IPC-styled alias for the node ID in a Session_vat_network or `TwoPartyVatNetwork`: namely an enumeration
@@ -78,12 +76,12 @@ using Rpc_msg_in = capnp::IncomingRpcMessage;
  * It is unlikely the typical RPC user needs to work with this; but if one extends the RPC system (such as
  * we did with Session_vat_network et al), this might be helpful.
  */
-using Vat_id = capnp::rpc::twoparty::VatId;
+using Vat_id = ::capnp::rpc::twoparty::VatId;
 
 /// Concrete `capnp::RpcSystem` to be used with Session_vat_network or `TwoPartyVatNetwork`.
-using Rpc_system = capnp::RpcSystem<Vat_id>;
+using Rpc_system = ::capnp::RpcSystem<Vat_id>;
 
-/// Non-template base for Session_vat_network (constants, types and what-not).
+/// Non-template base for Session_vat_network (constants, types, and what-not).
 struct Session_vat_network_base
 {
   // Constants.
@@ -93,35 +91,44 @@ struct Session_vat_network_base
    * not want to forbid the feature by passing zero.
    *
    * @internal
+   *
    * @todo Session_vat_network::S_N_MAX_INCOMING_FDS is set to `10` as a reasonable default... so is it reasonable?
    * I (ygoldfel) just picked something that felt like it would probably be more than enough in most conceivable
-   * uses of capnp-RPC's native handle (a/k/a FD a/k/a capability in capnp-RPC parlance) passing feature:
+   * uses of capnp-RPC's native handle (a/k/a FD in Unix a/k/a capability in capnp-RPC parlances) passing feature:
    * really a capnp-interface impl can only feature a single handle via `getFd()`, and one guesses that even
    * with all the promise-pipelining ever, a single internal `rpc::Message` is unlikely to combine more than 10
    * of these... probably?  On the other hand, why not just make this, like, 250-ish?  Answer: Comments in
    * capnp suggest this whole thing is a "security" thing, but I personally lack the background as to the concerns
-   * discussed there.  Just being honest!
+   * discussed there.  The to-do is to reach and document a greater level certainty about this
+   * value (and change it if appropriate).
    */
   static constexpr unsigned int S_N_MAX_INCOMING_FDS = 10;
-};
+
+  /// Reasonable default for Session_vat_network::streaming_flow_window_ki().  See the doc header for the latter.
+  static constexpr size_t S_STREAMING_FLOW_WINDOW_KI = 512;
+}; // struct Session_vat_network_base
 
 /**
  * The core class of Flow-IPC's zero-copyification-of-capnp-RPC module, `Session_vat_network` implements
- * `capnp::VatNetwork` and can be accurately described as `capnp::TwoPartyVatNetwork`, but with zero-copy
- * performance.  That is, it behaves ~identically to that stalwart of vanilla capnp-RPC (`TwoPartyVatNetwork`),
+ * `capnp::VatNetwork` and can be accurately described as `capnp::TwoPartyVatNetwork` but with zero-copy
+ * performance.  That is: it behaves ~identically to that stalwart of vanilla capnp-RPC (`TwoPartyVatNetwork`),
  * but every capnp-RPC message (including ones containing user's capnp-encoded data flying back and forth)
  * is (under the hood) allocated in SHM and is *never* copied.  This is essentially all upside, except that
  * Session_vat_network cannot work over a network link (for obvious reasons).  However, API-wise, the two
  * alternatives are used identically after construction!  So to the extent that user code can be written
  * independently of whether networking is involved, one can write generic code that will work with either
- * `capnp::TwoPartyVatNetwork` (required for networking) or Session_vat_network (better for local IPC).
+ * `capnp::TwoPartyVatNetwork` (required for networking) or Session_vat_network (better for local IPC).  It
+ * can even be a template parameter.
+ *
+ * @note It is also possible to have our Session_vat_network act identically to the vanilla `TwoPartyVatNetwork`,
+ *       such as for easy fallback, benchmarking, and so forth.  See the "Bonus!" section below for the recipe.
  *
  * ### How to use this to do capnp-RPC? ###
  * If you know capnp-RPC, then you probably already know about `VatNetwork` and `TwoPartyVatNetwork` and therefore
  * already can basically answer that question.
  *
  * If you do not, or are rusty, we recommend reading the introduction pages
- * in Cap 'n Proto documentation (https://capnproto.org/rpc.html, https://capnproto.org/cxxrpc.html);
+ * in Cap'n Proto documentation (https://capnproto.org/rpc.html, https://capnproto.org/cxxrpc.html);
  * perusing the Calculator sample; and once a bit comfortable coming back here.  We do give a
  * short recap here, but it is no substitute for the real thing (w/r/t giving one a capnp-RPC introduction).
  *
@@ -133,30 +140,38 @@ struct Session_vat_network_base
  *       `VatNetwork` + `capnp::RpcSystem` + `Client` + `Capability::Client`.
  *     - The rest of the API (stuff that is not `VatNetwork` virtual impls) is very small; essentially you
  *       can get a disconnect-promise via a particular method, same as with `TwoPartyVatNetwork`.
- *     - The only difference:
+ *     - The only difference: (next paragraph)
  *   - Constructing a Session_vat_network has a somewhat different API.  It makes use of ipc::session, and we
- *     provide a `kj`-promise-based-event-loop-friendly interface for creating `ipc::session::Sessions`s, so that
+ *     provide a KJ-promise-based-event-loop-friendly interface for creating `ipc::session::Sessions`s, so that
  *     it is natural to use in the capnp-RPC-ish style of programming.
  *   - We provide higher-layer APIs to make your life easier.
  *     (In all cases the core of things is still Session_vat_network.)
  *     - Client_context and Context_server will ease creation of the necessary `Session_vat_network`s by
- *       start ipc::session session/server and auto-completing the procedure yielding the `VatNetwork` for
+ *       starting ipc::session session/server and auto-completing the procedure yielding the `VatNetwork` for
  *       each capnp-RPC conversation.  However you shall then still create the #Rpc_system yourself and start and
  *       design your event loop.
  *     - Ez_rpc_client and Ez_rpc_server are higher-layer still and are exactly analogous to
  *       `capnp::EzRpcClient` and `capnp::EzRpcServer` (but zero-copy-enabled).  These will start and
  *       run the entire event loop as needed as well.
  *
+ * The `-> stream` feature (https://capnproto.org/news/#multi-stream-flow-control) has a potential impact on
+ * shared RAM (SHM) use, and possibly on performance.  The way the related *flow control window* is determined
+ * differs from vanilla (non-zero-copy) capnp-RPC's impl (as described in that link).
+ *   - You may control and/or observe the relevant window knob via streaming_flow_window_ki() methods
+ *     (accessor, mutator).
+ *
  * ### Bonus!  You can turn this into a plain, non-zero-copy `TwoPartyVatNetwork` ###
  * This might not blow your mind completely, but it might be nice to make use of Flow-IPC's ipc::session
- * mechanism for the initial connection -- though to be fair you can do similarly, with only a little bit more
- * effort -- with a `TwoPartyVatNetwork` itself.  It might be useful for benchmarking, debugging, profiling too.
+ * mechanism for the initial connection with a `TwoPartyVatNetwork` itself.  It might be useful for fallback,
+ * benchmarking, debugging, profiling too.
  *
- * To achieve this simply:
+ * To achieve this:
  *   - Still choose some SHM-provider (perhaps the one you'd use when benchmarking *with* zero-copy; otherwise
- *     any one of them) and therefore template parameters (or more likely a class alias).
+ *     any one of them) and therefore template parameters.  Easier yet use an alias like:
+ *       - ipc::session::shm::classic::Session_mv::Vat_network;
+ *       - ipc::session::shm::arena_lend::jemalloc::Session_mv::Vat_network.
  *   - Pass-in `shm_enabled_session = nullptr` (or, if applicable, `shm_lnd_brw = shm_arena = nullptr`) constructor
- *     arg(s).
+ *     arg(s).  Or:
  *   - The aforementioned higher-layer APIs (Client_context + Context_server; Ez_rpc_client + Ez_rpc_server)
  *     all provide access to this mode as well.  See their docs.
  *
@@ -166,17 +181,19 @@ struct Session_vat_network_base
  * perf implications here are different from the vanilla/non-zero-copy use case.)
  *
  * @internal
+ *
  * Impl notes
  * ----------
  * ### General approach ###
  * The goal here is to make a `capnp::VatNetwork` interface impl with the following characteristics.
  *   - It will keep any `rpc::Message`s -- including those carrying user-generated (over the course of their capnp-RPC
  *     work) capnp-payloads -- that the subsequent #Rpc_system needs to send -- in SHM instead of stuffing
- *     them into and out of an IPC byte-stream.  That is add zero-copy to capnp-RPC over a local IPC byte-stream pipe.
+ *     them into and out of an IPC byte-stream.  That is: add zero-copy to capnp-RPC over a local IPC byte-stream pipe.
  *     - It will manage timely deallocation (and allocation) of such in-SHM areas.
  *   - It will be reasonably easy to integrate with Flow-IPC facilities in the following areas:
- *     - The byte-stream (which ultimately just typically a pre-connected Unix-domain-socket stream) can be obtained
- *       from Flow-IPC, whether ipc::transport::Native_socket_stream, ipc::transport::Channel, or ipc::session::Session.
+ *     - The byte-stream (which ultimately is typically just a pre-connected Unix-domain-socket stream) can be obtained
+ *       from Flow-IPC, whether using ipc::transport::Native_socket_stream, ipc::transport::Channel, or
+ *       ipc::session::Session.
  *     - The SHM support can be obtained from Flow-IPC, either when direct-using SHM arenas/lenders/borrowers or
  *       support for these in ipc::session::Session variants.
  *
@@ -185,10 +202,10 @@ struct Session_vat_network_base
  *
  * To understand how we do this (impl-wise), we feel it is generally sufficient to (1) be familiar with capnp-RPC,
  * (2) be familiar with Flow-IPC at a reasonably in-depth level, and lastly (but not leastly) (3) grok
- * `capnp::TwoPartyVatNetwork` implementation at a reasonably deep level (but definitely not every detail; because
+ * `capnp::TwoPartyVatNetwork` implementation at a pretty deep level (but definitely not every detail; because
  * as of this writing we have happily been able to reuse it as a black-box data member and graft-on the necessary
  * zero-copy aspects without having to write our own variation of `TwoPartyVatNetwork` all the way through).  Oh
- * and read the code naturally.
+ * and, naturally, read the code.
  *
  * Here we will briefly summarize the key points.
  *
@@ -223,50 +240,65 @@ struct Session_vat_network_base
  * The key point: There is still a byte-stream involved, and we are still IPC-transmitting things over it.
  * Just, we are transmitting very small things instead of the actual messages.  So while examining TwoPartyVatNetwork
  * we asked ourselves: Can we rig it to do that part for us, while we add the required pre-processing and
- * post-processing to properly generate these little payloads and understand them properly, respectively?
+ * post-processing to properly generate these little payloads and understand them, respectively?
  * The answer: Yes, totally.  So that's what we are doing.
  *
- * There is no need to explain beyond that, as it'll just be verbiage, probably.  Now when you read the code it
- * should make sense; the details are tactical in nature.
+ * Now when you read the code it should make sense; the details are tactical in nature.
  *
  * ### The constructors ###
  * There was some question as what set of APIs to provide there.  A related topic is how to template-parameterize
  * the class.  There are various ways one can hook-up to the rest of Flow-IPC.  For example one can tailor those
- * decisions to the idea that one muse ipc::session end-to-end; or not require that at all and instead supply each
- * individual moving part (SHM-arena; SHM-lender/borrower; native socket handle for the byte-stream) individually;
- * or something in-between.
+ * decisions to the idea that (A) one must use ipc::session end-to-end; or (b) not require that at all and instead
+ * supply each individual moving part (SHM-arena; SHM-lender/borrower; native socket handle for the byte-stream)
+ * individually; or something in-between.
  *
- * TL;DR: We chose actually the latter as the baseline; while supplying one more ctor to make the former
+ * In short: We chose actually (B) as the baseline; while supplying one more ctor to make (A)
  * also equally possible; and the template parameterization supports all of that.  Arguably this flexibility makes
- * things a bit confusing due to all the degrees of freedom.  It is our hope that by also supplying higher-level
+ * things a bit confusing due to the degrees of freedom.  However: By also supplying higher-level
  * APIs Client_context and Context_server, as well as a range of aliases and documentation, we've reached a good
  * balance.  (Ez_rpc_client and Ez_rpc_server are higher-layer still.)
  *
  * ### Future work ###
  * I (ygoldfel) am reasonably confident that there is not a simpler version of this that somehow reuses existing
  * capnp-RPC features in black-boxy fashion to an even greater extent.  We've really kept everything
- * `TwoPartyVatNetwork` did when transmitting capnp-encoded bytes -- just replacing the nature and size (much smaller!)
- * of what is being encoded, and of course setting up the in-SHM serialization of the actual big payloads
+ * `TwoPartyVatNetwork` did when transmitting capnp-encoded bytes -- just replacing the nature and size (much
+ * smaller!) of what is being encoded, and of course setting up the in-SHM serialization of the actual big payloads
  * (from `RpcSystem` and the user's schema/code).
  *
  * There is however, surely, an impl that has better performance by reimplementing more of what a two-party
  * `VatNetwork` must implement.  Perhaps in-SHM messages can be batched for fewer allocations; the byte-stream
  * perf could be tuned for the smaller payloads; it is hard to say without some serious profiling and benchmarking.
  * We could stop relying on KJ `AsyncIoStream`s and co.; and somehow make use of our own Native_socket_stream.
- * The `VatNetwork` interface is flexible enough for all of that and more.
+ * (Note: "Could" does not mean "should" necessarily.)  The `VatNetwork` interface is flexible enough for all
+ * of that and more.  The most promising approach might be the following to-do:
+ *
+ * @todo In the ipc::transport::struc::Struct_builder-centered capnp-serialization module, a very perf-critical
+ * feature would be a serializer combining struc::Heap_fixed_builder and struc::shm::Builder, in that it
+ * would inline (in the for-IPC-transmission byte stream) smaller segment(s?) while SHM-storing larger ones
+ * (as shm::Builder does for all segments currently); integrate this work with both struc::Channel and
+ * capnp-RPC (rpc::Session_vat_network et al) structured-transport systems.  shm::Builder and its
+ * `MessageBuilder`-implementing core shm::Capnp_message_builder would perhaps be extended to support this new --
+ * faster! -- mode, with the ability to fallback to its current SHM-always behavior (and perhaps
+ * to `Heap_fixed_builder`'s heap-always behavior if so desired).  In designing this, there are two major questions
+ * to resolve first: 1, what is the fastest-behaving solution (where is the cut-over where SHM starts winning? etc.);
+ * 2, what is the best integration point between rpc::Session_vat_network and the new serializer.  (Integration
+ * with struc::Channel is already through the Struct_builder + Struct_reader concepts, here implemented as
+ * shm::Builder and shm::Reader respectively.  `Session_vat_network`'s possible integration methods are more
+ * of an open question.)
  *
  * A reminder: This capnp-RPC integration is an alternative to using struc::Channel which on the one hand is far
  * less flexible semantically (it has request/response and message-type-demuxing... but that's it) but on the other
- * hand much more predictable in terms of payload size and contents and timing.  We digress... point is one should
+ * hand much more predictable in terms of payload size and contents and timing.  We digress; point is, one should
  * keep in mind the alternative mechanism when profiling/learning/changing perf characteristics of this one; and
  * vice versa.  We could learn lessons that might apply to either.
  */
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 class Session_vat_network :
-  public capnp::TwoPartyVatNetworkBase, // A/k/a VatNetwork<...> (pure interface).
+  public ::capnp::TwoPartyVatNetworkBase, // A/k/a VatNetwork<...> (pure interface).
   public Session_vat_network_base,
   public Rpc_conn,
   public flow::log::Log_context,
+  private ::capnp::RpcFlowController::WindowGetter,
   private boost::noncopyable
 {
 public:
@@ -284,7 +316,7 @@ public:
    * our -- two-party-ness.  I.e., there are two parties in the "network" in which we are participating; and
    * hence the node ID is "I am server" or "I am client" (regardless of whether either one actually acts as such).
    */
-  using Base = capnp::TwoPartyVatNetworkBase;
+  using Base = ::capnp::TwoPartyVatNetworkBase;
 
   // Constructors/destructor.
 
@@ -310,7 +342,7 @@ public:
    *     - Where does one get such a handle?
    *       - With Flow-IPC (and indeed higher-layer APIs -- Client_context, Context_server, et al -- do this):
    *         One side creates a pre-connected stream-socket pair (e.g., via
-   *         asio_local_stream_socket::connect_pair()); keeps one end for its own ctor call like this
+   *         `asio_local_stream_socket::local_ns::connect_pair()`); keeps one end for its own ctor call like this
    *         one; and sends the other end to the opposing side -- over a `Native_handle`-bearing channel, such as
    *         an ipc::session init-channel -- for its own such ctor call.
    *       - Otherwise: Use a technique of your choice: a native Unix-domain stream socket connect/accept; or
@@ -323,20 +355,25 @@ public:
    *
    * To the extent capnp internals can throw: This ctor can throw `kj::Exception`.
    *
+   * @see streaming_flow_window_ki() which provides a perf- and RAM-use-relevant knob.
+   *
    * ### Special mode ###
    * Use `shm_enabled_session = nullptr` to have `*this` act identically to a regular, non-zero-copy-enabled
-   * `TwoPartyVatNetwork`.  This may be useful for benchmarking, debugging, profiling.
+   * `TwoPartyVatNetwork`.  This may be useful for fallback, benchmarking, debugging, profiling.
+   * streaming_flow_window_ki() has no effect in this mode.
    *
    * @internal
-   * I (ygoldfel) might be being paranoid in saying that Session_vat_network ctors can throw; look into it an
-   * potentially update docs for those ctor; Server_context `protected` ctor; and (slightly)
+   *
+   * We might be being paranoid above in saying that Session_vat_network ctors can throw; look into it and
+   * potentially update docs for those ctors; Server_context internal ctor; and (slightly)
    * Context_server::accept() more-complex-signature overload.
+   *
    * @endinternal
    *
    * @param logger_ptr
-   *        Logger to use for logging subsequently (or null to not log for sure).
+   *        Logger to use for logging subsequently (or null to definitely not log).
    * @param kj_io
-   *        A `kj` event loop context.
+   *        A KJ event loop context.
    * @param shm_enabled_session
    *        See above.
    *        This is the object with `.borrow_object()` and `.lend_object()` methods available for SHM-object
@@ -364,7 +401,7 @@ public:
    *     variant of any kind, though it can be.
    *   - The node ID (`srv_else_cli`) is specified by the caller.  The opposing object must use the inverse value.
    *   - The #Shm_arena need not come from any ipc::session::Session; you might have even created it manually
-   *     yourself.
+   *     yourself (shm::classic::Pool_arena, shm::arena_lend::jemalloc::Ipc_arena).
    *   - `bidir_transport` is provided as a raw native handle (in Unix parlance, FD).  Do note that, as with all
    *     ctors, `*this` takes ownership of the transport and is responsible for closing it.  `bidir_transport`
    *     is accordingly nullified by this ctor -- immediately and deterministically, even if the ctor then
@@ -379,14 +416,17 @@ public:
    * is an ipc::session::Session (SHM-enabled) variant.  However exotic/advanced users might require the use
    * of the present ctor instead.
    *
+   * @see streaming_flow_window_ki() which provides a perf- and RAM-use-relevant knob.
+   *
    * ### Special mode ###
    * Use `shm_lnd_brw = shm_arena = nullptr` to have `*this` act identically to a regular, non-zero-copy-enabled
-   * `TwoPartyVatNetwork`.  This may be useful for benchmarking, debugging, profiling.
+   * `TwoPartyVatNetwork`.  This may be useful for fallback, benchmarking, debugging, profiling.
+   * streaming_flow_window_ki() has no effect in this mode.
    *
    * @param logger_ptr
    *        Logger to use for logging subsequently (or null to not log for sure).
    * @param kj_io
-   *        A `kj` event loop context.
+   *        A KJ event loop context.
    * @param srv_else_cli
    *        See above.
    * @param shm_lnd_brw
@@ -412,6 +452,67 @@ public:
   virtual ~Session_vat_network();
 
   // Methods.
+
+  /**
+   * The `-> stream` flow control window limit, in kebibytes, used by capnp-RPC w/r/t the sum of in-SHM
+   * `stream`ing traffic by all objects operating through `*this` at any point in time.
+   *
+   * This value is meaningful if and only if operating in zero-copy (SHM-using) mode.  Thus if you used the
+   * "special mode" (in ctor, nullify args `shm_lnd_brw` or `shm_enabled_session`), it has no effect.
+   * We will then act identically to a vanilla `TwoPartyVatNetwork` with its normal flow control window computation.
+   *
+   * @see https://capnproto.org/news/#multi-stream-flow-control for an introduction to the `-> stream` feature.
+   *      In our case, however, flow control applies to the RAM use of streaming objects; that RAM use
+   *      = our use of shared memory (SHM) for streaming-involved bulk messages.  Regarding the part of the text
+   *      in that link describing how the kernel send buffer is used to compute a decent value for the window:
+   *      that computation does not apply, in our case; the value returned here (at any given point in time,
+   *      dynamically) will be used instead.
+   *
+   * @see the mutator overload, which can be used to change this value.
+   *
+   * A reasonable default value is used if one does not call the mutator:
+   * Session_vat_network_base::S_STREAMING_FLOW_WINDOW_KI.
+   *
+   * ### When to use the mutator ###
+   * This limit controls how much RAM at a time can be held by `*this` RPC engine in-flight -- meaning provided by
+   * sender-side user code, not yet consumed by receiver-side user code -- for `stream` payloads.  In our
+   * case there is no networking involved, with very high bandwidth and very low latency; the effect of most sane
+   * values on (streaming) throughput should be low.  A too-large value could have effect on RAM use; and in the
+   * presence of *possibly* limited SHM capacity it could even lead to out-of-arena-memory situation.  When/if this
+   * is a factor (meaning memory is at a premium), typical uses of SHM are directly under the user's control:
+   * you know when and how much you're allocating (usually).  In this case, though, capnp-RPC is deciding --
+   * only (*for this particular `stream` feature!*) -- how much it will allocate for you, at a time.
+   * Thus: If in the field you see RAM-use trouble as a result, or perhaps want to benchmark the window's effect on
+   * perf under load, the mutator overload streaming_flow_window_ki() may be useful.
+   *
+   * The default Session_vat_network_base::S_STREAMING_FLOW_WINDOW_KI is orders of magnitude smaller
+   * than *typical* SHM capacity available, hence *typically* you will not run out of SHM from `-> stream`ing.
+   * As of this writing the following SHM-providers come with Flow-IPC:
+   *   - SHM-jemalloc: There is no per-arena limit; so it becomes a matter of general out-of-memory or hitting
+   *     a SHM-use kernel limit if any.
+   *   - SHM-classic: There is a per-arena limit.  In `ipc::session`-created arenas a default is used which can
+   *     be overridden with session::shm::classic::Session_server::pool_size_limit_mi() mutator.  (If creating
+   *     a shm::classic::Pool_arena directly, the size must be supplied via the create-mode ctor.)  The default
+   *     as of this writing is 2Gi, while `S_STREAMING_FLOW_WINDOW_KI` is 1/2 Mi (several orders' of magnitude
+   *     difference).
+   *
+   * Ultimately, though, your mileage may vary, as environments and use-cases differ.
+   *
+   * @return See above.
+   */
+  size_t streaming_flow_window_ki() const;
+
+  /**
+   * Sets the value as returned by `streaming_flow_window_ki()` accessor.  See its doc header; among other things it
+   * suggests when using the present mutator may be helpful.
+   *
+   * A reasonable default value is used if one does not call this:
+   * Session_vat_network_base::S_STREAMING_FLOW_WINDOW_KI.
+   *
+   * @param limit_ki
+   *        The new value.  It must be positive.
+   */
+  void streaming_flow_window_ki(size_t limit_ki);
 
   /**
    * Yields a promise that is fulfilled when all `Rpc_conn`s returned by connect() and accept() are allowed
@@ -463,7 +564,7 @@ public:
    *
    * @return See above.
    */
-  kj::Own<capnp::RpcFlowController> newStream() override;
+  kj::Own<::capnp::RpcFlowController> newStream() override;
 
   /**
    * Implements `capnp::VatNetwork` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
@@ -524,12 +625,12 @@ private:
      * Number of times Session_vat_network::as_connection() executed minus the number of the returned
      * `Own<Rpc_conn>`s to have dropped their `Rpc_conn`s.
      */
-    mutable unsigned int m_refcount;
+    mutable unsigned int m_ref_count;
 
     // Methods.
 
     /**
-     * Implements interface by noting that the tracked #Rpc_conn has one fewer oustanding handle; and if that
+     * Implements interface by noting that the tracked #Rpc_conn has one fewer outstanding handle; and if that
      * means none remain then fulfills the `*this`-stored promise.
      *
      * The odd styling of the name is due to the interface being implemented.
@@ -546,14 +647,27 @@ private:
   // Methods.
 
   /**
-   * The core of connect() and accept(), used whenever those actually succed: returns `*this` as an #Rpc_conn.
+   * The core of connect() and accept(), used whenever those actually succeed: returns `*this` as an #Rpc_conn.
    * @return See above.
    */
   kj::Own<Rpc_conn> as_connection();
 
+  /**
+   * Implements `capnp::RpcFlowController::WindowGetter` API.  The odd styling of the name is due to the
+   * interface being implemented.
+   *
+   * @see newStream() body, where this is hooked into `*this` capnp-RPC engine, for background on why/what this is.
+   *
+   * @return See above.
+   */
+  size_t getWindow() override;
+
   // Data.
 
-  /// `kj` event loop context.
+  /// The value returned by streaming_flow_window_ki() except in bytes.
+  size_t m_streaming_flow_window_sz;
+
+  /// KJ event loop context.
   kj::AsyncIoContext* const m_kj_io;
 
   /**
@@ -601,9 +715,9 @@ private:
    * as a `unique_ptr` though.  Presumably it's something inside `BufferedMessageStream` triggering this;
    * capnp-1.0.2; clang 13, 15, 16, 17; C++17 mode at least.  The error is:
    * "the parameter for this explicitly-defaulted copy constructor is const, but a member or base requires it
-   * to be non-const" -- refering `optional` copy ctor.
+   * to be non-const" -- referring to `optional` copy ctor.
    */
-  boost::movelib::unique_ptr<capnp::BufferedMessageStream> m_capnp_msg_stream;
+  boost::movelib::unique_ptr<::capnp::BufferedMessageStream> m_capnp_msg_stream;
 
   /**
    * The Big Kahuna of our impl, this is the `TwoPartyVatNetwork` we reuse to transmit messages back and forth,
@@ -619,7 +733,7 @@ private:
    *
    * Null until early in the ctor body; then not null.
    */
-  std::optional<capnp::TwoPartyVatNetwork> m_network;
+  std::optional<::capnp::TwoPartyVatNetwork> m_network;
 
   /**
    * Starting at 0 (unknown), this is both (1) the first-segment-size (in `capnp::word`s) for the next
@@ -662,10 +776,10 @@ private:
    * ### Corollary ###
    * We happen to *not* follow `TwoPartyVatNetwork`'s lead: *our* #Rpc_conn impls such as
    * newOutgoingMessage() *are* `public`, and we inherit from #Rpc_conn `public`ly.  It really doesn't matter,
-   * as of this writing at least, but I (ygoldfel) just feel sinful doing the whole thing wherein
-   * one impls `public: virtual ...() = 0` but makes the impl itself `private`.  Frankly I do not see the
-   * harm of making this explicitly public.  What's the big "secret" after all?  And if it *is* a big secret,
-   * maybe just use pImpl or something (and make the thing movable, yay).
+   * as of this writing at least, but I (ygoldfel) just feel odd doing the whole thing wherein
+   * one impls `public: virtual ...() = 0` but makes the impl itself `private` but then also gives public access
+   * to it through as_connection().  Frankly I do not see the harm of making it explicitly public given the
+   * existence of as_connection().  What's the big "secret" after all?
    */
   kj::Own<Rpc_conn> m_conn;
 
@@ -674,7 +788,8 @@ private:
 
   /**
    * Fulfiller for the promise returned by accept() on the client side, or the
-   * second call on the server side.  Never fulfilled, because there is only one connection.
+   * second call on the server side.  Never fulfilled, because there is only one connection; kept alive (not
+   * destroyed) so as to not *reject* that promise either.  See accept() body.
    */
   kj::Own<kj::PromiseFulfiller<kj::Own<Rpc_conn>>> m_accept_fulfiller;
 
@@ -684,7 +799,7 @@ private:
    * `Own<Rpc_conn>` has reached end of life.
    *
    * ### What?  This `Fulfiller_disposer` and disconnect-promise business ###
-   * This hack (I am quoting the `TwoPartyVatNetwork` comment) can use some explaining.  The explanation in
+   * This "hack" (<= quoting the `TwoPartyVatNetwork` comment) can use some explaining.  The explanation in
    * `TwoPartyVatNetwork` is pithy and (for me, ygoldfel) eventually grokkable, but it took a bit of effort.
    * In hopes of explaining it more explicitly to save time here goes:
    *
@@ -704,7 +819,7 @@ private:
    * their `Rpc_conn` objects, indicating overall a "disconnect."  So the aforementioned disposer (deleter) should
    * firstly *not* `delete` anything; and secondly should decrement a refcount keeping track of how many times
    * connect() or accept() successfully returned an `Own<Rpc_conn>` (to `*this`) minus which of those handles
-   * has dropped their object.  Once the refcount is back to zero, they've all been dropped, hence promsie shall
+   * has dropped their object.  Once the refcount is back to zero, they've all been dropped, hence promise shall
    * be fulfilled.
    *
    * @see #m_disconnect_fulfiller which is where that logic takes place.
@@ -765,7 +880,7 @@ public:
    *
    * @return See above.
    */
-  capnp::AnyPointer::Builder getBody() override;
+  ::capnp::AnyPointer::Builder getBody() override;
 
   /**
    * Implements `Rpc_msg_out` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
@@ -849,7 +964,7 @@ public:
    *
    * @return See above.
    */
-  capnp::AnyPointer::Reader getBody() override;
+  ::capnp::AnyPointer::Reader getBody() override;
 
   /**
    * Implements `Rpc_msg_in` API.  Typically this is invoked by the capnp-RPC system (`RpcSystem` et al)
@@ -906,18 +1021,20 @@ template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::~Rpc_msg_out_impl() = default;
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-capnp::AnyPointer::Builder
+::capnp::AnyPointer::Builder
   Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::getBody()
 {
+  using ::capnp::AnyPointer;
+
   /* This is just what TwoPartyVatNetwork's Rpc_msg_out_impl equivalent does -- but via its MallocMessageBuilder,
    * whereas we use our in-SHM MessageBuilder from Flow-IPC. */
-  return m_capnp_msg_in_shm.template getRoot<capnp::AnyPointer>();
+  return m_capnp_msg_in_shm.template getRoot<AnyPointer>();
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::send()
 {
-  using capnp::AnyPointer;
+  using ::capnp::AnyPointer;
   namespace rpc = ::capnp::rpc;
 
   /* This is straightforward, once one understands how the pieces fit together.  TwoPartyVatNetwork here
@@ -932,31 +1049,28 @@ void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::
    * so I'd rather keep it all in one place in the code.)
    *
    * The only other aspect of this is the isShortLivedMsg field.  We explain this near the top of
-   * Session_vat_network delegated-to ctor.  Do note that this may look bad, in that we interpret the "user"
-   * (RpcSystem really) payload as a specific schema (rcp::Message); but that's what TwoPartyVatNetwork
-   * wants to do in the first place, as an optimization; it just can't anymore, because the rpc::Message
-   * cannot be "peeked into" cheaply at the lower layer that is BufferMessageStream below our layer.
-   * So we replace that short-lived-message callback with our own which peeks into *our* byte-streamed message...
-   * hence we have to load the required info into that message.  Fortunately that info is a mere Boolean. */
+   * Session_vat_network delegated-to ctor.  Thus:
+   * Rpc_msg_in::isShortLivedRpcMessage(), as of this writing computing it as control msgs <=> not CALL/RETURN <=>
+   * short-lived=yes, is how vanilla TwoPartyVatNetwork determines whether an incoming rpc::Message is short-lived --
+   * directly inside the in-buffer.  So we use the same computation but *before* the send; then on receipt check the
+   * bool result. */
 
   auto capnp_msg_in_heap_root
     = m_msg->getBody().initAs<schema::detail::CapnpRpcMsgTopSerialization>();
 
-  auto payload_rpc_msg_root = getBody().template getAs<rpc::Message>();
-  switch (payload_rpc_msg_root.which())
+  const auto capnp_msg_in_shm_root_rdr = getBody().asReader();
+  if (!Rpc_msg_in::isShortLivedRpcMessage(capnp_msg_in_shm_root_rdr))
   {
-  case rpc::Message::CALL:
-  case rpc::Message::RETURN:
     capnp_msg_in_heap_root.setIsShortLivedMsg(false);
-  default:
-    break; // Leave it as default (true).  Most messages are short-lived apparently, so TPVN can optimize nicely.
   }
 
   auto shm_top_serialization_root = capnp_msg_in_heap_root.initShmTopSerialization();
   const bool ok = m_capnp_msg_in_shm.lend(&shm_top_serialization_root, m_daddy->m_shm_lnd_brw);
   /* Now the message in SHM is safe from deallocation until both m_capnp_msg_in_shm is destroyed with *this,
    * *and* the receiver MessageReader (see Rpc_msg_in_impl) has had .borrow() called on it, and that MessageReader
-   * is destroyed with its containing Rpc_msg_in_impl. */
+   * is destroyed with its containing Rpc_msg_in_impl.  (Corollary: if the SHM-handle never reaches the receiver --
+   * the connection died with the little message still queued in m_msg's write queue -- then the in-SHM message
+   * stays allocated until the session is torn down.  Bounded by session lifetime; acceptable.) */
 
   KJ_REQUIRE(ok,
              "Was asked to send a capnp-message by the RPC-system, but Capnp_message_builder::lend() "
@@ -1001,16 +1115,17 @@ void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::
     const auto log_component = m_daddy->get_log_component();
     if (logger_ptr->should_log(flow::log::Sev::S_TRACE, log_component))
     {
+      const auto root_as_rpc_msg = capnp_msg_in_shm_root_rdr.template getAs<rpc::Message>();
       FLOW_LOG_SET_CONTEXT(logger_ptr, log_component);
       FLOW_LOG_TRACE_WITHOUT_CHECKING("Session_vat_network [" << *m_daddy << "]: Outgoing message send: "
                                       "message (possibly truncated) "
-                                      "[" << ostreamable_capnp_brief(payload_rpc_msg_root.asReader()) << "]; "
+                                      "[" << ostreamable_capnp_brief(root_as_rpc_msg) << "]; "
                                       "size = [" << m_capnp_msg_in_shm.sizeInWords() << "] words x "
                                       "[" << sizeof(::capnp::word) << "] bytes/word; outer serialization (of "
                                       "little SHM-handle+ in heap/to copy into transport) = "
                                       "[" << msg_out_sz_words << "] words.");
       FLOW_LOG_DATA("Here is the complete message:"
-                    "\n" << ostreamable_capnp_full(payload_rpc_msg_root.asReader()));
+                    "\n" << ostreamable_capnp_full(root_as_rpc_msg));
     }
   } // if (logger_ptr)
 
@@ -1020,18 +1135,56 @@ void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 size_t Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::sizeInWords()
 {
-  return m_msg->sizeInWords();
-  /* @todo Ensure this is used for byte-stream perf or something.  If not we might conceivably want to return
-   * m_capnp_msg_in_shm->sizeInWords() instead. */
-}
+  /* What to return here is not necessarily obvious (of course that is subjective).  The API contract is
+   * "Get the total size of the message, for flow control purposes."  The question then is what "flow control"
+   * in this particular context is.  Naively one could assume it has to do with controlling back-pressure
+   * w/r/t simply bytes traveling over the transport (whether -- in vanilla TwoPartyVatNetwork -- over the network
+   * or IPC; just the latter for us).  Without thinking about it too hard one would then simply
+   *   return m_msg->sizeInWords(); // This would return the size of our little SHM handle-containing message.
+   * All cool -- that's what we're still transmitting; done!  But no.  To explain:
+   *
+   * (Firstly let's eliminate the over-the-network case from consideration.  We are not doing that, so it'll be
+   * easier and fully appropriate to ignore in the discussion.  So: just local IPC.)
+   *
+   * This sizeInWords() does *not* apply to general traffic going through this connection, in the first place.
+   * It applies only to a specific capnp-RPC user-facing feature: *streaming*.  (This is completely independent of
+   * AsyncIoStream or AsyncCapabilityStream... which is in fact the IPC-transport byte/FD-stream one could naively
+   * guess per the paragraph above.  Not that!)  This is where in the schema an interface-method return type
+   * is `-> stream`.  As of this writing this isn't covered in the main docs at the capnp web site, but it is
+   * introduced nicely in https://capnproto.org/news/#multi-stream-flow-control.  Read that
+   * as background, optionally, but the bottom line is: It allows one to set up, say, bulk uploads -- which will stream
+   * at a controlled rate.  This feature consists of two parts; part 1 is the syntactic niceness of expressing this
+   * without having to set up the logic in one's own code; and part 2 -- which concerns us here -- is that by
+   * expressing it in that syntax, it causes capnp-RPC's guts to engage *multi-stream flow control*, wherein it
+   * takes a good stab at automatically controlling the rate at which it'll allow the `stream` payload to
+   * proceed.  So that's the flow control in question:
+   *   - A window-size (controlled by newStream(); see that guy).
+   *   - An accounting of how much of the window is currently in use. <- The relevant part here in sizeInWords().
+   *
+   * (Reminder: We're ignoring any networking aspect of this.)  Without networking -- with a tiny latency and
+   * very high bandwidth -- what's left to control is how much RAM is taken by (collective) streams.
+   * (Incidentally: There is at most one ongoing stream per capability a/k/a interface-implementing object, and
+   * 2+ objects don't share streams.)  So, e.g., if I generate random bytes in chunks, stream them over capnp-RPC, and
+   * the receiver then (say) writes them to tape as fast as it can, then I wouldn't want to keep generating
+   * more random bytes until receiver-side has indicated it has written a bunch and can accept more bytes now.
+   * Without back-pressure the accumulated-too-fast (and more and more so) bytes would exceed the available RAM.
+   * So that's, ultimately, all it is.
+   *
+   * What we're returning here, then, is how much we'd contribute to that window.  Both the window (see
+   * newStream()) and the window-used (here) are about RAM use.  For a vanilla TwoPartyVatNetwork the RAM use
+   * is just the stuff traveling through the IPC-transport: first inside a MallocMessageBuilder around here (m_msg),
+   * then in the kernel buffer(s), then in/near the MessageReader in the IncomingRpcMessage (a/k/a Rpc_msg_in).
+   * So in that case `m_msg->sizeInWords()` is right.  In our case, we avoid (almost) all that: the use of
+   * the transport is (basically) negligible (~only SHM-handles go through it); instead we just plop user
+   * (streamed) data in SHM.  SHM is RAM; our area in it just doesn't get copied from one area to another to another
+   * (zero-copy!).  Thus: */
+  return m_capnp_msg_in_shm.sizeInWords();
+} // Session_vat_network::Rpc_msg_out_impl::sizeInWords()
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::setFds(kj::Array<int> fds)
 {
   m_msg->setFds(std::move(fds));
-  /* Note: I (ygoldfel) admit to being puzzled as to why this signature takes Array<> by value... while
-   * Array<> disallows copying.  Even understanding why the signature compiled in the first place is a bit
-   * murky, but that can be explained (omitted).  Odd... maybe I am the one missing something though! */
 }
 
 // Session_vat_network::Rpc_msg_in_impl implementations.
@@ -1058,6 +1211,19 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::Rpc_ms
                "we cannot receive a message with zero-copy over it.  Stuff is going down.  This is not "
                "usually some catastrophe; just the IPC conversation has finished.");
 
+  /* Caution!  As of capnp-1.0.2 calling MessageReader::sizeInWords() before e.g. getRoot() causes undefined
+   * behavior (SEGV if you're lucky, endless looping if less lucky); seems the necessary structures are set up
+   * in lazy fashion, and sizeInWords() does not trigger it.
+   *
+   * We want our sizeInWords() { m_capnp_msg_in_shm.sizeInWords() } to work immediately (as opposed to hang/crash
+   * if called pre-getBody()), so "prime" it by calling m_capnp_msg_in_shm.getRoot() via getBody().
+   * Perf impact: getBody() is ~guaranteed to be needed anyway by regular capnp-RPC use, so we're just priming its
+   * lazy-setup earlier; it'd be done anyway otherwise but just later.  Hence no (obvious) perf impact.
+   *
+   * Secondarily: If (<= not typical) we want to TRACE/DATA-log the pretty-print of *this contents just below,
+   * then we'll need getBody()'s result anyway. */
+  const auto root = getBody();
+
   // (Re. logging: see comment in Rpc_msg_out_impl::send(); applies equally here.)
   const auto logger_ptr = daddy->get_logger();
   if (logger_ptr)
@@ -1067,21 +1233,17 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::Rpc_ms
     {
       FLOW_LOG_SET_CONTEXT(logger_ptr, log_component);
 
-      const auto root = m_capnp_msg_in_shm.template getRoot<capnp::AnyPointer>()
-                                          .template getAs<rpc::Message>();
+      const auto root_as_rpc_msg = root.template getAs<rpc::Message>();
 
-      /* (Caution!  As of capnp-1.0.2 calling MessageReader.sizeInWords() before e.g. getRoot() causes undefined
-       * behavior (SEGV if you're lucky, endless looping if less lucky); seems the necessary structures are set up
-       * in lazy fashion, and sizeInWords() does not trigger it.) */
       FLOW_LOG_TRACE_WITHOUT_CHECKING("Session_vat_network [" << *daddy << "]: Incoming message receive: "
                                       "message (possibly truncated) "
-                                      "[" << ostreamable_capnp_brief(root) << "]; "
+                                      "[" << ostreamable_capnp_brief(root_as_rpc_msg) << "]; "
                                       "size = [" << m_capnp_msg_in_shm.sizeInWords() << "] words x "
                                       "[" << sizeof(::capnp::word) << " bytes/word]; outer serialization (of "
                                       "little SHM-handle+ in heap/copied from transport) = "
                                       "[" << m_msg->sizeInWords() << "] words.");
       FLOW_LOG_DATA("Here is the complete message:"
-                    "\n" << ostreamable_capnp_full(root));
+                    "\n" << ostreamable_capnp_full(root_as_rpc_msg));
     }
   } // if (logger_ptr)
 } // Session_vat_network::Rpc_msg_in_impl::Rpc_msg_in_impl()
@@ -1090,18 +1252,29 @@ template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::~Rpc_msg_in_impl() = default;
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-capnp::AnyPointer::Reader
+::capnp::AnyPointer::Reader
   Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::getBody()
 {
-  return m_capnp_msg_in_shm.template getRoot<capnp::AnyPointer>();
+  return m_capnp_msg_in_shm.template getRoot<::capnp::AnyPointer>();
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 size_t Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::sizeInWords()
 {
-  return m_msg->sizeInWords();
-  /* @todo Ensure this is used for byte-stream perf or something.  If not we might conceivably want to return
-   * m_capnp_msg_in_shm.sizeInWords() instead. */
+  /* The impl here is, as you can see, identical to _out_impl::sizeInWords()'s.  The reason for it is
+   * half-obvious but without certain added context one could be misled about some related stuff.  (I know... vague.)
+   * To wit:
+   *
+   * It is, as explained inside Rpc_msg_out_impl::sizeInWords(), again about RAM; and therefore it is again --
+   * in our case -- about how much space we take in SHM, with the in-heap part (m_msg.sizeInWords(); for that
+   * matter also, say, `sizeof(*this)`) deemed negligible.  The added context: As of this writing it has
+   * nothing to do with the `-> stream` feature (whereas _out_impl's is exclusively about that).  This time
+   * it is counted against (instead of the streaming flow-control window/see newStream()) the limit
+   * RpcSystem::get/setFlowLimit(), a simple security -- possibly safety -- feature to flood attacks wherein
+   * there are many unresponded-to (remote procedure) calls in RAM.
+   *
+   * Still about RAM though; hence: */
+  return m_capnp_msg_in_shm.sizeInWords();
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
@@ -1121,6 +1294,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
    Native_handle&& bidir_transport, unsigned int hndl_transport_limit_or_0) :
 
   flow::log::Log_context(logger_ptr, Log_component::S_RPC),
+  m_streaming_flow_window_sz(S_STREAMING_FLOW_WINDOW_KI * 1024),
   m_kj_io(kj_io),
   m_srv_else_cli(srv_else_cli),
   m_shm_lnd_brw(shm_lnd_brw),
@@ -1129,9 +1303,10 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   m_accepted(false),
   m_disconnect_promise(nullptr)
 {
-  using capnp::MallocMessageBuilder;
-  using capnp::BufferedMessageStream;
-  using capnp::ReaderOptions;
+  using ::capnp::MallocMessageBuilder;
+  using ::capnp::BufferedMessageStream;
+  using ::capnp::ReaderOptions;
+  using ::capnp::AnyPointer;
   using kj::newPromiseAndFulfiller;
   using boost::movelib::make_unique;
   using util::Own_native_handle;
@@ -1139,11 +1314,14 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
 
   /* First things first: deterministically consume (nullify) bidir_transport, into an auto-closer.  From here on
    * -- including if something below throws -- the handle is never again the caller's to close: it is ours, until
-   * kj takes ownership in wrap[Unix]SocketFd() below.  This is our advertised ctor contract. */
+   * KJ takes ownership in wrap[Unix]SocketFd() below.  This is our advertised ctor contract. */
   Own_native_handle bidir_transport_hndl{std::move(bidir_transport)};
   assert(bidir_transport.null());
 
-  assert((bool(m_shm_lnd_brw) == bool(m_shm_arena)) && "Either specify neither or both; just one is weird.");
+  KJ_REQUIRE(bool(m_shm_lnd_brw) == bool(m_shm_arena),
+             "Either specify neither or both; just one is weird.");
+  /* (Bad args.  A KJ_REQUIRE() seems reasonably KJ-style.  See justification for its use over assert()
+   * in streaming_flow_window_ki() knob mutator.) */
 
   if (m_shm_lnd_brw)
   {
@@ -1166,23 +1344,39 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   /* TwoPartyVatNetwork m_network uses an optimization in its next-lower layer, namely BufferedMessageStream
    * which streams capnp-encoded messages (we prepare this guy: m_capnp_msg_stream), wherein if it considers
    * an in-message "short-lived" (guaranteed to be handled fully before the next in-message), then it can
-   * reuse some internal stuff instead of having to make a copy of that message to store it for later.  By
-   * default it'll look inside the message, technically violating the layering it'll assume it is an
-   * rpc::Message (which is the case for all vanilla TPVNs), check its top-level union-which enum value
-   * (message type), and assume yes-short-lived for most types except too.  That won't work for us, as we
-   * leverage TPVN m_network to transmit a byte stream of our little SHM-handles (to the real rpc::Message
-   * messages, now in SHM in our case); so that default check will result in garbage results and ultimately
+   * somewhat-later capnp-read the message directly inside some incoming-data buffer space.  Otherwise it must
+   * be copied elsewhere first, so it can be read in peace without being overwritten by subsequent in-messages.
+   * So vanilla TPVN will look inside the message, correctly assume it is an rpc::Message (which is the case for
+   * all vanilla TPVNs), check its top-level union-which enum value (message type), and assume yes-short-lived
+   * for most types except two: CALL/RETURN.  Incidentally these types <=> it is a user-mutated message, meaning
+   * it is their code setting fields through the usual capnp-generated API.  Hence *not* these types <=> it is
+   * a *control* message generated for internal purposes by capnp-RPC.
+   *
+   * This vanilla behavior won't work for us, as we leverage TPVN m_network
+   * to transmit a byte stream of our little SHM-handles (to the real rpc::Message messages, which are
+   * now in SHM in our case); so that default check of as-if-rpc::Message will result in garbage results and ultimately
    * in our experience an assert-fail regarding short-livedness (at best).  Fortunately TPVN lets us provide
    * our own BufferedMessageStream (which, again, we do), where we can easily provide a different
    * is-short-lived callback (which is what follows here).  We figure we have two reasonable choices:
    *   -# Say no messages are short-lived (just return false).  Copying our little SHM-handle-bearing messages
-   *      probably isn't too expensive, and the alternative technique in the next bullet point does involve
+   *      probably isn't too expensive*, and the alternative technique in the next bullet point does involve
    *      making those messages a bit bigger and doing a little extra computation for each.
-   *   -# Simply mark, in the byte-streamed message itself (whose contents and interpretation we control in
-   *      in *this), whether it is short-lived.  Then the callback can just check that.
-   * For now going with 2: it doesn't "feel" like the added data and computation are significant, and perhaps
+   *      - `*` But that's on a per-message basis.  In aggregate there could be non-trivial amounts of data in
+   *        them.  Moreover: yes, our IPC-transmitted msgs are small... but so are their *control* `rpc::Message`s --
+   *        likely bigger but still small -- and indeed the messages they classify as short-lived *are* the control
+   *        messages, not the (potentially large) user (CALL/RETURN) `rpc::Message`s.  So actually the situations
+   *        (vanilla TPVN versus our SHM-handle-transmitting alternative) are pretty similar in this sense.  I.e.:
+   *        our "wire" representation of the would-be short-lived (<=> control) messages is somewhat smaller
+   *        than vanilla TPVN's, but the latter are still small already, and yet the capnp code considers it
+   *        worthwhile to optimize away potential copying thereof.  Hence:
+   *   -# Simply mark, in the byte-streamed message itself (whose contents and interpretation we control
+   *      in *this), whether it is short-lived.  Then the callback can just check that.  As a result we'll
+   *      get the available optimization (don't copy-out control messages) for a low encoding/decoding cost.
+   *
+   * Going with 2: the added data and computation are not significant, and perhaps
    * the optimization is worth keeping even if it's for much smaller messages than in a vanilla TPVN.
-   * @todo Look into it: benchmark perf, etc.  Possibly change to bullet 1 above. */
+   * @todo Look into it: benchmark perf.  How much does it help for us, versus how much
+   * does it help vanilla TPVN?  Questions like that: could be interesting. */
 
   BufferedMessageStream::IsShortLivedCallback is_short_lived_msg_func;
   if (m_shm_lnd_brw)
@@ -1191,37 +1385,37 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
     {
       /* In Rpc_msg_out_impl we mark this bool appropriately, so just interpret it.
        * This code here is inspired by the impl of capnp::IncomingRpcMessage::getShortLivedCallback(). */
-      return msg_in.getRoot<capnp::AnyPointer>().template getAs<schema::detail::CapnpRpcMsgTopSerialization>()
-                                                .getIsShortLivedMsg();
+      return msg_in.getRoot<AnyPointer>().template getAs<schema::detail::CapnpRpcMsgTopSerialization>()
+                                         .getIsShortLivedMsg();
     };
   }
   else // if (special mode where we do nothing useful)
   {
-    is_short_lived_msg_func = Rpc_msg_in::getShortLivedCallback(); // Just do what TwoPartyVatNetwork would od.
+    is_short_lived_msg_func = Rpc_msg_in::getShortLivedCallback(); // Just do what TwoPartyVatNetwork would do.
   }
 
   ReaderOptions network_reader_opts; // Default values.
   if (!m_shm_lnd_brw)
   {
-    /* This is arguably a hack... and it would probably go away, if we handle to ReaderOptions-related to-do
+    /* This is arguably a hack... and it would probably go away, if we handle the ReaderOptions-related to-do
      * in our class doc header.  For now though: If not in "special mode" (where we would skip zero-copy)
      * we override the traversal-limit option for the in-SHM messages (see shm::Capnp_message_reader impl) to
      * make it essentially infinity.  Well, in this "special mode" we want to have the same capabilities, just
      * without zero-copy.  So make the same change at this higher layer in this case. */
-    network_reader_opts.traversalLimitInWords = std::numeric_limits<uint64_t>::max() / sizeof(capnp::word);
+    network_reader_opts.traversalLimitInWords = std::numeric_limits<uint64_t>::max() / sizeof(::capnp::word);
   }
 
   if (hndl_transport_limit_or_0 == 0)
   {
     // Create non-FD-passing vanilla AsyncIoStream and use the TwoPartyVatNetwork ctor that takes such accordingly.
-    m_kj_stream_of_blobs // (Per the TAKE_OWNERSHIP flag kj owns the handle from this call on; so release ours here.)
+    m_kj_stream_of_blobs // (Per the TAKE_OWNERSHIP flag KJ owns the handle from this call on; so release ours here.)
       = m_kj_io->lowLevelProvider->wrapSocketFd(disowned_native_handle(std::move(bidir_transport_hndl)).m_native_handle,
                                                 kj::LowLevelAsyncIoProvider::TAKE_OWNERSHIP);
     m_capnp_msg_stream = make_unique<BufferedMessageStream>(*m_kj_stream_of_blobs,
                                                             std::move(is_short_lived_msg_func));
     m_network.emplace(*m_capnp_msg_stream,
-                      m_srv_else_cli ? capnp::rpc::twoparty::Side::SERVER
-                                     : capnp::rpc::twoparty::Side::CLIENT,
+                      m_srv_else_cli ? ::capnp::rpc::twoparty::Side::SERVER
+                                     : ::capnp::rpc::twoparty::Side::CLIENT,
                       network_reader_opts);
   }
   else
@@ -1235,8 +1429,8 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
     m_capnp_msg_stream = make_unique<BufferedMessageStream>(*m_kj_stream_of_blobs_hndls,
                                                             std::move(is_short_lived_msg_func));
     m_network.emplace(*m_capnp_msg_stream, hndl_transport_limit_or_0,
-                      m_srv_else_cli ? capnp::rpc::twoparty::Side::SERVER
-                                     : capnp::rpc::twoparty::Side::CLIENT,
+                      m_srv_else_cli ? ::capnp::rpc::twoparty::Side::SERVER
+                                     : ::capnp::rpc::twoparty::Side::CLIENT,
                       network_reader_opts);
   }
 
@@ -1261,8 +1455,8 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
 
     MallocMessageBuilder peer_vat_id{VAT_ID_SZ};
     peer_vat_id.initRoot<Vat_id>()
-               .setSide(m_srv_else_cli ? capnp::rpc::twoparty::Side::CLIENT // We're server; "connect" to client.
-                                       : capnp::rpc::twoparty::Side::SERVER); // Vice versa.
+               .setSide(m_srv_else_cli ? ::capnp::rpc::twoparty::Side::CLIENT // We're server; "connect" to client.
+                                       : ::capnp::rpc::twoparty::Side::SERVER); // Vice versa.
     auto conn_uptr_maybe = m_network->connect(peer_vat_id.getRoot<Vat_id>());
     KJ_IF_MAYBE(conn_uptr_ptr, conn_uptr_maybe)
     {
@@ -1273,7 +1467,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
       FLOW_LOG_FATAL("Session_vat_network [" << *this << "]: "
                      "There is no reason for TwoPartyVatNetwork::connect() to fail here; "
                      "it should have essentially just returned its `*this`.  Yet it failed.  Bug?  Aborting.");
-      std::abort(); // @todo Maybe just more confidently assert() and move on sans logging/aborting?
+      std::abort();
     }
   }
 
@@ -1282,7 +1476,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   auto paf = newPromiseAndFulfiller<void>();
   m_disconnect_promise = paf.promise.fork();
   m_disconnect_fulfiller.m_fulfiller = kj::mv(paf.fulfiller);
-  m_disconnect_fulfiller.m_refcount = 0;
+  m_disconnect_fulfiller.m_ref_count = 0;
 } // Session_vat_network::Session_vat_network()
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
@@ -1313,6 +1507,8 @@ template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 kj::Own<Rpc_msg_out>
   Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::newOutgoingMessage(unsigned int seg0_word_sz)
 {
+  using ::capnp::sizeInWords;
+
   /* Pre-process by dropping in our own Rpc_msg_out impl (in terms of the vanilla one from TwoPartyVatNetwork).
    *
    * As for message/segment size guesses:
@@ -1326,7 +1522,7 @@ kj::Own<Rpc_msg_out>
            ? kj::heap<Rpc_msg_out_impl>
                (m_conn->newOutgoingMessage((m_msg_out_max_sz_words == 0)
                                              ? ((Builder_base::S_MAX_SERIALIZATION_SEGMENT_SZ / sizeof(::capnp::word))
-                                                + capnp::sizeInWords<schema::detail::CapnpRpcMsgTopSerialization>())
+                                                + sizeInWords<schema::detail::CapnpRpcMsgTopSerialization>())
                                              : m_msg_out_max_sz_words),
                 seg0_word_sz,
                 this)
@@ -1373,8 +1569,8 @@ kj::Maybe<kj::Own<Rpc_conn>> Session_vat_network<Shm_lender_borrower_t, Shm_aren
    * both (e.g., both sides can connect()).  This might just be an inconsistency (a bit of dead code of sorts),
    * or it might be a subtle necessity.  I've seen some empirical evidence it is the latter (details omitted).
    * @todo Look into it (if only for a better understanding). */
-  if (ref.getSide() == (m_srv_else_cli ? capnp::rpc::twoparty::Side::SERVER
-                                       : capnp::rpc::twoparty::Side::CLIENT))
+  if (ref.getSide() == (m_srv_else_cli ? ::capnp::rpc::twoparty::Side::SERVER
+                                       : ::capnp::rpc::twoparty::Side::CLIENT))
   {
     FLOW_LOG_INFO("Session_vat_network [" << *this << "]: "
                   "Session_vat_network::connect() invoked (perhaps by a capnp RPC-system) "
@@ -1392,15 +1588,16 @@ kj::Maybe<kj::Own<Rpc_conn>> Session_vat_network<Shm_lender_borrower_t, Shm_aren
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 kj::Promise<kj::Own<Rpc_conn>> Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::accept()
 {
-  /* This is, like connect(), essentially copy/pasted from TwoPartyVatNetwork.  I (ygoldfel) as of this writing
-   * do not totally grasp why it does all of what it does:
-   *   - Only returning a thing, if we are server-node and only once, makes sense intuitively (if not formally,
-   *     as I don't 100% grasp the requirements of the more general VatNetwork interface that doesn't assume
-   *     two-party-ness).
-   *   - Returning promise that will never fulfill otherwise, I am not sure why.
-   * That said!  TwoPartyVatNetwork knows what it's doing; this stuff is invoked by RpcSystem et al, not us
-   * or user code (at least typically); and the code is brief; so just copy/pasting here (and in connect())
-   * seems perfectly reasonable. */
+  /* This is, like connect(), essentially copy/pasted from TwoPartyVatNetwork.  How it is used (capnp-1.0.2):
+   * every RpcSystem -- client-side (makeRpcClient()) or server-side -- starts an accept loop in its ctor:
+   * `network.accept().then([](conn) { <register conn>; <loop again>; })`.  It is strictly sequential: the next
+   * accept() is issued only once the previous one's promise resolves.  Hence:
+   *   - Server node: 1st accept() yields our one and only connection; the 2nd accept() yields a promise that never
+   *     resolves; hence a 3rd is never issued.  The loop simply waits forever, as intended in a two-party world.
+   *   - Client node: the 1st accept() already yields the never-resolving promise; same eternal wait.  (So a client-side
+   *     accept() call is not a misuse but the normal course of events.)
+   * The never-resolving promise is thus the two-party idiom for "there will be no more connections; do not error out
+   * the accept loop either." */
 
   if (m_srv_else_cli && (!m_accepted))
   {
@@ -1422,39 +1619,69 @@ kj::Promise<kj::Own<Rpc_conn>> Session_vat_network<Shm_lender_borrower_t, Shm_ar
   }
   else // if (cli)
   {
-    FLOW_LOG_WARNING("Session_vat_network [" << *this << "]: "
-                     "Session_vat_network::accept() invoked (perhaps by a capnp RPC-system) "
-                     "in node with ID = [srv_else_cli=0]: returning eternal promise.");
+    FLOW_LOG_INFO("Session_vat_network [" << *this << "]: "
+                  "Session_vat_network::accept() invoked (perhaps by a capnp RPC-system) "
+                  "in node with ID = [srv_else_cli=0]: returning eternal promise.");
   }
 
-  // Create a promise that will never be fulfilled.
+  /* Create a promise that will never be fulfilled.  We must keep the fulfiller alive: destroying it would *reject*
+   * the promise (broken-promise exception), which would land in the RpcSystem accept loop's error handler.
+   * Per the above this branch executes at most once per *this (the loop awaits this promise forever), so the
+   * assignment below never overwrites a live fulfiller.  (Were it to somehow happen anyway, the effect would be that
+   * rejection -- logged by RpcSystem as an error -- not undefined behavior.) */
   auto paf = kj::newPromiseAndFulfiller<kj::Own<Rpc_conn>>();
   m_accept_fulfiller = std::move(paf.fulfiller);
   return std::move(paf.promise);
-
-  /* Comment (taken from original TwoPartyVatNetwork) on m_accept_fulfiller doc header says m_accept_fulfiller
-   * is used on client-side calls to accept() or 2nd call on server side.  But m_accept_fulfiller is reassigned
-   * repeatedly, if any of that happens more than just one time?  Wouldn't the one already in
-   * m_accept_fulfiller disappear?  Is that fine, or...?  Maybe accept() being called again after yielding
-   * an infinite promise is against contract/undefined behavior?
-   * (@todo This might all be totally clear, once I grasp kj promises et al and/or the formal VatNetwork interface
-   * contract in full detail. -ygoldfel)
-   * In practice it's all largely academic probably. */
 } // Session_vat_network::accept()
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
-kj::Own<capnp::RpcFlowController> Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::newStream()
+size_t Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::streaming_flow_window_ki() const
 {
-  /* We're letting TwoPartyVatNetwork impose its cool, fancy flow control policy, as we're letting it
-   * handle our byte stream of little SHM-handle-bearing messages.  @todo Since the messages are uniform and
-   * small, and this is always local IPC (not networked), look into it. */
-  return m_conn->newStream();
+  assert(((m_streaming_flow_window_sz % 1024) == 0)
+         && "How did m_streaming_flow_window_sz get set to a non-multiple of Ki?  Maintenance drift bug?");
+  return m_streaming_flow_window_sz / 1024;
+}
+
+template<typename Shm_lender_borrower_t, typename Shm_arena_t>
+void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::streaming_flow_window_ki(size_t limit_ki)
+{
+  KJ_REQUIRE(limit_ki > 0,
+             "limit_ki=0 is forbidden by contract");
+  /* (Bad arg.  We said "It must be positive" without specifying enforcement.  A KJ_REQUIRE() seems reasonably KJ-style.
+   * The Flow convention for plainly-absurd in-args in user-facing APIs is a mere assert() -- for better or worse,
+   * a defense is out of scope here -- but here KJ_REQUIRE() works fine, and we are in the land of KJ
+   * event loops/promises/exceptions, so consistency-wise it fits.) */
+
+  FLOW_LOG_TRACE("Session_vat_network [" << *this << "]: User setting streaming flow control window to "
+                 "[" << limit_ki << "Ki]; replacing current setting [" << streaming_flow_window_ki() << "Ki].");
+
+  m_streaming_flow_window_sz = (limit_ki * 1024);
+}
+
+template<typename Shm_lender_borrower_t, typename Shm_arena_t>
+size_t Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::getWindow()
+{
+  return m_streaming_flow_window_sz;
+}
+
+template<typename Shm_lender_borrower_t, typename Shm_arena_t>
+kj::Own<::capnp::RpcFlowController> Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::newStream()
+{
+  using ::capnp::RpcFlowController;
+
+  /* Regarding the true-clause of the following ternary:
+   * See streaming_flow_window_ki() doc header(s) for high-level background; and Rpc_msg_out::sizeInWords()
+   * body for a slightly deeper dive.  Given all that: in the main (non-special/fallback) mode, at any
+   * given point the window limit shall be streaming_flow_window_ki(), WindowGetter::getWindow() impl. */
+
+  return m_shm_lnd_brw ? RpcFlowController::newVariableWindowController(*this)
+                       : m_conn->newStream(); // Special mode: do what TwoPartyVatNetwork does.
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 Vat_id::Reader Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::getPeerVatId()
 {
-  return m_conn->getPeerVatId(); // Really it's just SERVER or CLIENT originaly depending on m_srv_else_cli.
+  return m_conn->getPeerVatId(); // Really it's just SERVER or CLIENT originally depending on m_srv_else_cli.
 }
 
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
@@ -1468,7 +1695,7 @@ kj::Own<Rpc_conn> Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::as_co
 {
   /* If this goes from 0->1, then a returned guy like us going 1->0 triggers disposer m_disconnect_fulfiller to run.
    * Thus on_disconnect() works.  And/or see m_disconnect_promise doc header. */
-  ++m_disconnect_fulfiller.m_refcount;
+  ++m_disconnect_fulfiller.m_ref_count;
 
   return kj::Own<Rpc_conn>(this, m_disconnect_fulfiller);
 }
@@ -1495,7 +1722,7 @@ void
   Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>
     ::Session_vat_network::Fulfiller_disposer::disposeImpl(void*) const
 {
-  if (--m_refcount == 0)
+  if ((--m_ref_count) == 0)
   {
     m_fulfiller->fulfill();
   }

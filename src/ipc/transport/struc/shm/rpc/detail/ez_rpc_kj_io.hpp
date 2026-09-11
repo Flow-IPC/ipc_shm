@@ -28,9 +28,10 @@ namespace ipc::transport::struc::shm::rpc
 
 // Types.
 
-/* @todo Technically this stuff should be fwd-declared in a detail/..._fwd.hpp.  It's just used so sparingly, that
+/* @todo Technically this stuff should be fwd-declared in a detail/rpc_fwd.hpp.  It's just used so sparingly, that
  * it seemed like overkill.  However... that's how laziness sets in, and spaghetti code takes hold eventually.
- * So... do it sometime. */
+ * So... do it sometime.  Or maybe do it once there's more stuff than a single `class` forward-declaration and a
+ * single use of that class. */
 
 /**
  * Internal-use thread-local singleton-style access to a `kj::AsyncIoContext` which, for each given thread,
@@ -69,7 +70,7 @@ public:
 private:
   // Constructors.
 
-  /// Private ctor that set #m_kj_io to its permanent value, `kj::setupAsyncIo()`.
+  /// Private ctor that sets #m_kj_io to its permanent value, `kj::setupAsyncIo()`.
   Ez_rpc_kj_io();
 
   // Data.

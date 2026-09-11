@@ -44,6 +44,9 @@ namespace ipc::transport::struc::shm::rpc
  * All notes in Client_context doc header relating to its semantics after successful Client_context::sync_connect()
  * apply to a `*this` equally.  A `*this` is by definition always in PEER state until destruction.
  *
+ * @note Certain perf-knobs may be available through `this->vat_network()`.  This is, along with the
+ *       above-mentioned more basic notes, introduced in the Client_context doc header.
+ *
  * @internal
  *
  * ### Impl notes ###
@@ -52,10 +55,11 @@ namespace ipc::transport::struc::shm::rpc
  * like `.sync_connect()`.  However that common part is so simple/short that the trouble involved would probably
  * be costlier than the limited copy/paste-like action going on.  (As of this writing this file is <250 lines
  * including license header and comments.)
+ *
  * @endinternal
  *
  * @tparam Server_session_t
- *         For a given Context_server instantiation `S`, this equals `S::Session_server_obj::Server_session_obj`.
+ *         For a given Context_server instantiation `S`, this is `S::Session_server_obj::Server_session_obj`.
  */
 template<typename Server_session_t>
 class Server_context :
@@ -83,12 +87,13 @@ public:
    * Movable smart-pointer handle to a `*this`.  Spiritually equivalent to `kj::Own<Server_context<...>>`.
    *
    * @internal
+   *
    * Since we are going for a KJ/capnp-RPC-style API with Context_server et al, initially I (ygoldfel) went
    * with `kj::Own<>` here, as one undoubtedly would if coding KJ/capnp itself.  However I was then trying
-   * to some internally-needed up-casting and having a really annoying type; at one point a `.release()` would
+   * to do some internally-needed up-casting and having a really annoying time; at one point a `.release()` would
    * have helped, but `Own` lacks it intentionally.  In short I got annoyed and just reverted to the Flow-IPC-ish
-   * choice of single-ownership-ptr.  They're used identically (generally), and if really required one can always
-   * make an `Own` for this after-all... so just, whatevs!
+   * choice of single-ownership-ptr.  They're used identically (in the mainstream), and if really required one
+   * can always make an `Own` for this after-all... so just, whatevs!
    */
   using Ptr = boost::movelib::unique_ptr<Server_context>;
 
@@ -102,6 +107,9 @@ public:
   /**
    * Returns pointer to Session_vat_network established for use in your #Rpc_system.
    * The #Vat_network is valid if and only if `*this` exists.
+   *
+   * @see `vat_network()->streaming_flow_window_ki()` is a perf-knob of potential interest accessible through here.
+   *       See Session_vat_network::streaming_flow_window_ki() doc header(s).
    *
    * See Session_vat_network docs; but in short, generally, once constructed this guy is used ~identically
    * to `capnp::TwoPartyVatNetwork`.
@@ -143,7 +151,7 @@ protected:
    * @param logger_ptr
    *        Logger to use for logging subsequently.
    * @param kj_io
-   *        A `kj` event loop context.
+   *        A KJ event loop context.
    * @param session
    *        `Server_sesion` in almost-PEER state.  We shall subsume this object and immediately move it
    *        to PEER state (session::Server_session::init_handlers() as of this writing).
@@ -189,6 +197,7 @@ Server_context<Server_session_t>::Server_context(flow::log::Logger* logger_ptr, 
   m_session(std::move(session)),
   m_network(get_logger(), kj_io, sans_shm_transport ? nullptr : &m_session, std::move(bidir_transport),
             enable_hndl_transport ? Session_vat_network_base::S_N_MAX_INCOMING_FDS : 0)
+  // ^-- Can throw (unlikely).
 {
   FLOW_LOG_INFO("rpc::Server_ctx [" << *this << "]: Created in PEER state (presumably by Context_server); "
                 "zero-copy-enabled? = [" << (!sans_shm_transport) << "].");
@@ -214,7 +223,7 @@ void Server_context<Server_session_t>::on_session_hosed(const Error_code& err_co
                 "shut-down this Server_ctx which will shut down the Session_vat_network and lastly the "
                 "ipc::session::Session.");
 
-  // Why do we merely log but in no way report this to `*this` user?  See Client_context dtor; same deal here.
+  // Why do we merely log but in no way report this to `*this` user?  See Client_context equivalent; same deal here.
 }
 
 template<typename Server_session_t>
@@ -228,7 +237,7 @@ template<typename Server_session_t>
 const typename Server_context<Server_session_t>::Vat_network*
   Server_context<Server_session_t>::vat_network() const
 {
-  return const_cast<Server_context*>(this)->vat_network(); // Rare use of const_cast<> that's not an anti-pattern.
+  return const_cast<Server_context*>(this)->vat_network();
 }
 
 template<typename Server_session_t>
@@ -242,7 +251,7 @@ template<typename Server_session_t>
 const typename Server_context<Server_session_t>::Session_obj*
   Server_context<Server_session_t>::session() const
 {
-  return const_cast<Server_context*>(this)->session(); // Rare use of const_cast<> that's not an anti-pattern.
+  return const_cast<Server_context*>(this)->session();
 }
 
 template<typename Server_session_t>

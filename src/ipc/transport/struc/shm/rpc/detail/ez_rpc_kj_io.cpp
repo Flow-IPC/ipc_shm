@@ -48,7 +48,7 @@ Ez_rpc_kj_io::Ptr Ez_rpc_kj_io::this_thread_obj() // Static.
     s_this_thread_obj_observer = this_thread_obj_ptr = Ptr{new Ez_rpc_kj_io}; // Private ctor; cannot use make_shared().
   }
   /* else { (In this thread) We are being called not the first time; and are observing a shared_ptr (Ptr)
-   *        pointing to result of setupAsyncIo(); and since we returned it, they still have 1+ objects in that
+   *        pointing to result of setupAsyncIo(); and since we returned it, they still have 1+ objects in that group
    *        around; so it exists still.  So we can create (and return) a new member of that shared_ptr group. } */
   return this_thread_obj_ptr;
 }

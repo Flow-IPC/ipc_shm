@@ -46,6 +46,7 @@ namespace ipc::transport::struc::shm::rpc
  * originally implemented on the opposing side (where it is passed-to an Ez_rpc_server or equivalent).
  *
  * On this side a simple use of Ez_rpc_client might look like:
+ *
  *   ~~~
  *   // # .capnp schema:
  *   // interface Adder { add @0 (left :Int32, right :Int32) -> (value :Int32); }
@@ -99,6 +100,10 @@ public:
    * Constructs us by immediately (and non-blockingly, synchronously) establishing the capnp-RPC session.
    * E.g., obtain the bootstrap interface handle via get_main() immediately on return from this ctor.
    *
+   * @warning `cli_app_ref` and `srv_app_ref` must remain alive throughout `*this` lifetime: their *addresses*
+   *          are stored and accessed at various points later.  This is consistent with the intended
+   *          global-registry lifecycle of `Client_app`/`Server_app`/`App`; see the `struct` session::App doc header.
+   *
    * ### Error conditions ###
    * This may throw; in fact it will throw, if it is unable to establish a session -- most likely because
    * no session-server is up at the moment.  In particular see
@@ -118,7 +123,7 @@ public:
    *        If you do not use `.getFd()` feature of the capnp-RPC system, it is best to set this to `false`,
    *        it is said, for safety and possibly even security.
    * @param sans_shm_transport
-   *        If `false` (default) then zero-copy transport (internaly achieved by using SHM) shall be in effect.
+   *        If `false` (default) then zero-copy transport (internally achieved by using SHM) shall be in effect.
    *        If `true` this shall instead regress to act identically to `capnp::EzRpcClient` in this regard.
    *        This may be useful for benchmarking/debugging/profiling, or if one has some other compelling
    *        (perf or otherwise) reason to do vanilla non-zero-copy IPC underneath.
@@ -154,7 +159,7 @@ public:
    *
    * @return See above.
    */
-  capnp::Capability::Client get_main();
+  ::capnp::Capability::Client get_main();
 
   /**
    * Returns reference to immutable core Client_context.
@@ -163,20 +168,29 @@ public:
   const Client_context_obj& rpc_context() const;
 
   /**
+   * Returns pointer to mutable core Client_context.  `*this` is intended as a simple-to-use default, so
+   * anything beyond that -- e.g., knobs available through `rpc_context()->vat_network()` -- is accessible
+   * via the core object itself here.
+   *
+   * @return See above.
+   */
+  Client_context_obj* rpc_context();
+
+  /**
    * Get the wait-scope for this thread's KJ event-loop which allows one to synchronously wait on promises.
    * @return See above.
    */
   kj::WaitScope* get_wait_scope();
 
   /**
-   * Get the underlying `AsyncIoProvider` set up for this thread.  This is useful if you want
+   * Get the underlying `AsyncIoProvider` set up for this thread.  This is useful, if you want
    * to do some non-RPC I/O in asynchronous fashion.
    * @return See above.
    */
   kj::AsyncIoProvider* get_io_provider();
 
   /**
-   * Get the underlying `LowLevelAsyncIoProvider` set up for this thread.  This is useful if you want
+   * Get the underlying `LowLevelAsyncIoProvider` set up for this thread.  This is useful, if you want
    * to do some less-portable non-RPC I/O in asynchronous fashion.
    * @return See above.
    */
@@ -215,6 +229,7 @@ private:
  *
  * On this side a simple use of Ez_rpc_server might look like the following (please see the client snippet in
  * Ez_rpc_client doc header).  (Here we assume only a single interface impl regardless of which app connects.)
+ *
  *   ~~~
  *   // # .capnp schema:
  *   // interface Adder { add @0 (left :Int32, right :Int32) -> (value :Int32); }
@@ -265,15 +280,20 @@ public:
 
   /**
    * Constructs us by immediately beginning background listen.  In order to kick off actual (automatic) handling
-   * please do: `kj::NEVER_DONE.wait(*(S.get_wait_scope()))`, where `S` is `this`.
+   * please do: `kj::NEVER_DONE.wait(*(S.get_wait_scope()))`, where `S` is `*this`.
    *
    * This ctor variant shall attempt to do zero-copy transport for each incoming session, period.
    * If you'd like to do otherwise for at least some incoming sessions use the other ctor
    * which features the relevant `transport_method_func` arg.
    *
+   * @warning `srv_app_ref` and `cli_app_master_set_ref` -- and the `Client_app`s to which the latter
+   *          (transitively) refers -- must remain alive throughout `*this` lifetime.  This
+   *          is consistent with the intended global-registry lifecycle of `Server_app`/`Client_app`/`App`; see
+   *          the `struct` session::App doc header.
+   *
    * ### Error conditions ###
    * This may throw; in fact it will throw, if it is unable to establish a session-server.
-   * In particular see Server_context ctor doc header if interested in specific possible errors (#Error_code values).
+   * In particular see Context_server ctor doc header if interested in specific possible errors (#Error_code values).
    *
    * @tparam Main_interface_func
    *         Function type matching signature
@@ -282,18 +302,18 @@ public:
    * @param logger_ptr
    *        Logger to use for logging subsequently.  (You may use null to forego this completely.)
    * @param main_interface_func
-   *        Invoked from unspecified thread that is not this ctor's invoking thread during
-   *        each session's setup, the returned `capnp::Capability::Client` shall be used as the
-   *        bootstrap capnp-`interface` impl accessible by the opposing client.
+   *        Invoked from the KJ event loop thread during each session's setup, the returned
+   *        `capnp::Capability::Client` shall be used as the bootstrap capnp-`interface` impl accessible by
+   *        the opposing client.
    * @param srv_app_ref
    *        Properties of this server application.  The address is copied; the object is not copied.
    *        Among other things this lists identification info about which opposing applications are allowed to
    *        speak with us.
    * @param cli_app_master_set_ref
    *        The set of all known `Client_app`s.  The address is copied; the object is not copied.
-   *        Technically, from our POV, it need only list the `Client_app`s whose names are
+   *        Technically, from our PoV, it need only list the `Client_app`s whose names are
    *        in `srv_app_ref.m_allowed_client_apps`.  Refer to session::App doc header for best practices on
-   *        maintaining this master list in practice.
+   *        maintaining this master list.
    * @param enable_hndl_transport
    *        See Ez_rpc_client ctor.
    */
@@ -311,13 +331,15 @@ public:
    * See `transport_method_func` arg below.
    *
    * Starting with the former:
-   *   - Asynchronously, in an unspecified thread that is not the calling thread of this ctor,
-   *     during the session-establishment process, Flow-IPC shall call your function
-   *     `transport_method_func()`.
+   *   - Asynchronously, in the KJ event loop thread, during the session-establishment process,
+   *     Flow-IPC shall call your function `transport_method_func()`.
    *   - It will give it 1 basic piece of info that might be useful in making the decision.
    *   - It shall expect the function to return `true` to, indeed, disable zero-copy transport; or `false`
    *     to proceed with zero-copy (as the other ctor would cause to happen always).
    *   - Then it will do so (for that particular session).
+   *
+   * @warning regarding `srv_app_ref`, `cli_app_master_set_ref` lifetime:
+   *          See warning in other ctor's doc header.
    *
    * @tparam Transport_method_func
    *         Function type matching signature
@@ -335,8 +357,7 @@ public:
    * @param enable_hndl_transport
    *        See other ctor.
    * @param transport_method_func
-   *        Invoked from unspecified thread that is not this ctor's invoking thread during
-   *        each session's setup, the returned `bool` shall determine whether to use zero-copy
+   *        Invoked in the KJ event loop thread, the returned `bool` shall determine whether to use zero-copy
    *        transmission (internally using SHM) or not: `false` and `true` respectively.
    *        The opposing Ez_rpc_client ctor must have had arg `sans_shm_transport` assigned the same value
    *        (or equivalent logic, if you're using something other than Ez_rpc_client).
@@ -363,14 +384,26 @@ public:
   const Context_server_obj& context_server() const;
 
   /**
-   * Get the underlying `AsyncIoProvider` set up for this thread.  This is useful if you want
+   * Returns pointer to mutable core Context_server.  `*this` is intended as a simple-to-use default, so
+   * anything beyond that -- e.g., Context_server::streaming_flow_window_default_ki() which applies to each
+   * capnp-RPC session we subsequently accept -- is accessible via the core object itself here.
+   *
+   * Note that the KJ event loop does not turn until you wait on it (e.g., `kj::NEVER_DONE.wait()`), so
+   * anything set through here immediately after construction shall apply to every session accepted.
+   *
+   * @return See above.
+   */
+  Context_server_obj* context_server();
+
+  /**
+   * Get the underlying `AsyncIoProvider` set up for this thread.  This is useful, if you want
    * to do some non-RPC I/O in asynchronous fashion.
    * @return See above.
    */
   kj::AsyncIoProvider* get_io_provider();
 
   /**
-   * Get the underlying `LowLevelAsyncIoProvider` set up for this thread.  This is useful if you want
+   * Get the underlying `LowLevelAsyncIoProvider` set up for this thread.  This is useful, if you want
    * to do some less-portable non-RPC I/O in asynchronous fashion.
    * @return See above.
    */
@@ -400,7 +433,7 @@ private:
   // Data.
 
   /// The computer of the bootstrap capnp-`interface` depending on which `Client_app` is connecting.
-  flow::Function<capnp::Capability::Client (const session::Client_app&)> m_main_interface_func;
+  flow::Function<::capnp::Capability::Client (const session::Client_app&)> m_main_interface_func;
 
   /**
    * The decider of whether to use zero-copy transport (`false`) or not (`true`) depending on which `Client_app`
@@ -426,13 +459,14 @@ template<typename Client_session_t>
 Ez_rpc_client<Client_session_t>::Ez_rpc_client(flow::log::Logger* logger_ptr,
                                                const session::Client_app& cli_app_ref,
                                                const session::Server_app& srv_app_ref,
-                                               bool enable_hndl_transport,
-                                               bool sans_shm_transport) :
+                                               bool enable_hndl_transport, bool sans_shm_transport) :
   m_this_thread_kj_io(Ez_rpc_kj_io::this_thread_obj()),
 
   // We are so simple, that we don't even keep our own Log_context -- or log -- just let m_rpc_ctx do it.
   m_rpc_ctx(logger_ptr, &m_this_thread_kj_io->m_kj_io, cli_app_ref, srv_app_ref, enable_hndl_transport)
 {
+  using ::capnp::makeRpcClient;
+
   if (sans_shm_transport)
   {
     m_rpc_ctx.sync_connect_sans_shm_transport();
@@ -441,7 +475,7 @@ Ez_rpc_client<Client_session_t>::Ez_rpc_client(flow::log::Logger* logger_ptr,
   {
     m_rpc_ctx.sync_connect();
   }
-  m_rpc_sys.emplace(capnp::makeRpcClient(*(m_rpc_ctx.vat_network())));
+  m_rpc_sys.emplace(makeRpcClient(*(m_rpc_ctx.vat_network())));
 }
 
 template<typename Client_session_t>
@@ -452,13 +486,13 @@ typename Type::Client Ez_rpc_client<Client_session_t>::get_main()
 }
 
 template<typename Client_session_t>
-capnp::Capability::Client Ez_rpc_client<Client_session_t>::get_main()
+::capnp::Capability::Client Ez_rpc_client<Client_session_t>::get_main()
 {
   /* This code in EzRpcClient was curiously optimized; I think maybe get_main() might be called frequently.
    * So we left that in, even if the specifics are a tiny bit different (more Flow-ish and Flow-IPC-ish). */
 
   using util::Blob_mutable;
-  using Word = capnp::word;
+  using Word = ::capnp::word;
   using boost::array;
 
   // This magic number used for a tiny optimization is stolen from TwoPartyVatNetwork insides.
@@ -468,7 +502,7 @@ capnp::Capability::Client Ez_rpc_client<Client_session_t>::get_main()
   Capped_sz_capnp_message_builder message{Blob_mutable{scratch.data(), VAT_ID_SZ_WORDS * sizeof(Word)},
                                           true}; // Gotta zero it for capnp; array<> lacks ctor and does not.
   auto host_id = message.getRoot<Vat_id>();
-  host_id.setSide(capnp::rpc::twoparty::Side::SERVER);
+  host_id.setSide(::capnp::rpc::twoparty::Side::SERVER);
 
   return m_rpc_sys->bootstrap(host_id);
 }
@@ -495,6 +529,12 @@ template<typename Client_session_t>
 const typename Ez_rpc_client<Client_session_t>::Client_context_obj& Ez_rpc_client<Client_session_t>::rpc_context() const
 {
   return m_rpc_ctx;
+}
+
+template<typename Client_session_t>
+typename Ez_rpc_client<Client_session_t>::Client_context_obj* Ez_rpc_client<Client_session_t>::rpc_context()
+{
+  return &m_rpc_ctx;
 }
 
 template<typename Client_session_t>
@@ -540,6 +580,7 @@ Ez_rpc_server<Session_server_t>::Ez_rpc_server(flow::log::Logger* logger_ptr, Ma
 template<typename Session_server_t>
 void Ez_rpc_server<Session_server_t>::accept_loop(bool enable_hndl_transport)
 {
+  using ::capnp::makeRpcServer;
   using kj::heapString;
   using Transport_method_func = decltype(m_transport_method_func);
   using Server_context_obj = typename Context_server_obj::Server_context_obj;
@@ -564,12 +605,13 @@ void Ez_rpc_server<Session_server_t>::accept_loop(bool enable_hndl_transport)
   m_tasks.add(m_ctx_srv.accept(enable_hndl_transport,
                                [](auto&&...) { return 0; },
                                Transport_method_func(m_transport_method_func)) // Copy it before move eats it.
-                       .then([this, enable_hndl_transport](auto&& accept_result) mutable
+                       .then([this, enable_hndl_transport]
+                               (auto&& accept_result) mutable
   {
     accept_loop(enable_hndl_transport); // Go again (not synchronously; no earlier than this function returns).
 
     /* accept_result.m_context is the Server_context -- with the session::Session and capnp::VatNetwork ready to go!
-     * For a working RPC setup just need to make the Rpc_system (capnp::makeRpcServer) and load the boostrap
+     * For a working RPC setup just need to make the Rpc_system (capnp::makeRpcServer()) and load the bootstrap
      * interface into that. */
 
     const auto& cli_app = *(accept_result.m_context->session()->client_app());
@@ -579,7 +621,7 @@ void Ez_rpc_server<Session_server_t>::accept_loop(bool enable_hndl_transport)
     auto& network = *(accept_result.m_context->vat_network());
     auto main_interface = m_main_interface_func(cli_app);
     Rpc_bundle_ptr rpc_bundle{new Rpc_bundle{ std::move(accept_result.m_context),
-                                              capnp::makeRpcServer(network, std::move(main_interface)) }};
+                                              makeRpcServer(network, std::move(main_interface)) }};
 
     // That'll all just work by itself now; so just need to set up the last bullet above (delete on disconnect).
 
@@ -596,7 +638,7 @@ void Ez_rpc_server<Session_server_t>::accept_loop(bool enable_hndl_transport)
      * In short this is simply not generally fatal for anything but this connect attempt itself; so if
      * we're gonna do something by default it should be log and proceed normally.
      * @todo Consider making this configurable.  Though note they can always control it themselves by
-     * making a custom loop using Server_context and their own promise chains; Ez_rpc_server's conceit it
+     * making a custom loop using Server_context and their own promise chains; Ez_rpc_server's conceit is
      * to be a simple-to-use default, almost (hopefully not quite) like a demo. */
 
     accept_loop(enable_hndl_transport);
@@ -638,6 +680,12 @@ const typename Ez_rpc_server<Session_server_t>::Context_server_obj&
 }
 
 template<typename Session_server_t>
+typename Ez_rpc_server<Session_server_t>::Context_server_obj* Ez_rpc_server<Session_server_t>::context_server()
+{
+  return &m_ctx_srv;
+}
+
+template<typename Session_server_t>
 std::ostream& operator<<(std::ostream& os, const Ez_rpc_server<Session_server_t>& val)
 {
   return os << "[ctx_srv[" << val.context_server() << "]]@" << &val;
@@ -645,7 +693,7 @@ std::ostream& operator<<(std::ostream& os, const Ez_rpc_server<Session_server_t>
 
 } // namespace ipc::transport::struc::shm::rpc
 
-/* Addendum: The source code in this file is based on a small portion of Cap 'n Proto,
+/* Addendum: The source code in this file is based on a small portion of Cap'n Proto,
  * version 1.0.2, namely parts of the files `ez-rpc.h` and `ez-rpc.c++`.  There are
  * substantial differences, nor was there a way to reuse those works in black-box
  * fashion, but the inspiration and some of the execution is rooted in those files.

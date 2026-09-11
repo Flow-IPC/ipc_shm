@@ -40,7 +40,7 @@
  *   - struc::shm::rpc is an *alternative to* ipc::struc::Channel (+ struc::Msg_out, struc::Msg_in).  The doc header for
  *     ipc::struc::Channel, at the top, briefly contrasts itself versus us (pros/cons).
  *
- * XXX: How to use it!  capnp-RPC brief explainer!  Etc.
+ * XXX: How to use it!  capnp-RPC brief explainer!  Etc. / Update: Upon reading other doc headers, there's pretty good info already on at least Client_context, Context_server. Manual is supposed to be reader-friendly and will itself have to decide what to repeat from there. So writing another novel here to possibly triplicate things... let's not. Be judicious about how to spread these things.
  */
 namespace ipc::transport::struc::shm::rpc
 {
@@ -64,9 +64,9 @@ class Ez_rpc_client;
 template<typename Session_server_t>
 class Ez_rpc_server;
 
-/* Various Flow-IPC-styled aliases of capnp types (Rpc_conn, Rpc_msg_out, Rpc_msg_in, Vat_id, Rpc_system) live in
- * session_vat_network.hpp -- not here, though normally aliases would belong in the present _fwd file.  Why?
- * capnp ships no _fwd.hpp counterparts of its own; so it was a choice between hand-forward-declaring capnp
+/* Various Flow-styled aliases of capnp types (Rpc_conn, Rpc_msg_out, Rpc_msg_in, Vat_id, Rpc_system) live in
+ * session_vat_network.hpp -- not here, though normally aliases would belong in the present _fwd.hpp file.  Why?
+ * Answer: capnp ships no _fwd.hpp counterparts of its own; so it was a choice between hand-forward-declaring capnp
  * types here (fragile against upstream changes; and impossible for Rpc_conn, which aliases a *nested* class)
  * and placing the aliases where the capnp-RPC headers are included anyway.  Hence: there.  Bonus: the present
  * file thus stays light-weight (capnp-RPC-include-free) for non-RPC-using code. */

@@ -36,7 +36,7 @@ $Cxx.namespace("ipc::transport::struc::shm::schema");
 
 # --- END Header.
 
-struct ShmHandle
+struct ShmHandle # XXXshould we get rid of the wrapper -- make ShmHandle = Data? Save some IPC-bytes? I didn't think in terms of such details pre-perf-dive. Look at all hot-path things (don't forget capnp-RPC-supporting schema)
 {
   serialization @0 :Data;
   # shm::Builder::Session-concept pointee impl lend_object() returns this as a C++ flow::util::Blob_sans_log_context

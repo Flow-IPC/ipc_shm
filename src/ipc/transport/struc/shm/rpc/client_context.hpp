@@ -52,14 +52,14 @@ namespace ipc::transport::struc::shm::rpc
  * ### Background ###
  * (This description will go down easier if you are familiar with capnp-RPC basics.)
  *
- * As introduced in ipc::transport::struc::shm::rpc namespace doc header, Flow-IPC's support zero-copy RPC
+ * As introduced in ipc::transport::struc::shm::rpc namespace doc header, Flow-IPC's support of zero-copy RPC
  * centers on its implementation of the `capnp::VatNetwork` interface: Session_vat_network.  Consider its
  * non-zero-copy cousin shipped with capnp, `TwoPartyVatNetwork`.  To use it -- in the absence of simplifying
  * all-in-one helpers like `capnp::EzRpcClient` -- the following essential steps are usually involved,
  * on the *client end*:
  *   -# Connect a low-level transport stream (for local IPC, a Unix domain socket stream) to a listening server
- *      at some address (in Linux typically an abstrace address; or more generally a file-addressed socket).
- *   -# Create a `TwoPartyVatNetwork`, giving it the stream endpoint (e.g., as a socket handle; from step 1),
+ *      at some address (in Linux typically an abstract address; or more generally a file-addressed socket).
+ *   -# Create a `TwoPartyVatNetwork`, giving it the stream endpoint (e.g., as a socket handle; from step 1)
  *      which it owns from that point on (up to and including closing it).
  *   -# Create an `RpcSystem`, passing it a reference to the `VatNetwork` from step 2; then perform RPC
  *      in various ways.  (Typically, if one connected as a client, they would also obtain an interface impl
@@ -77,8 +77,8 @@ namespace ipc::transport::struc::shm::rpc
  *     opposing side.)
  *   - Client_context::sync_connect() will perform both steps 1 and 2 above...
  *     - ...except the `VatNetwork` -- which you should obtain via the vat_network() accessor of `*this` --
- *       is Session_vat_network.  That is, it will avoid all copying of underlying messages, meaning they can
- *       effective be of any size at all with no difference in performance/latency.  Internally it will use
+ *       is Session_vat_network.  That is: it will avoid all copying of underlying messages, meaning they can
+ *       effectively be of any size at all with no difference in performance/latency.  Internally it will use
  *       SHared Memory (SHM) supplied by Flow-IPC.
  *   - You specify the SHM-provider to be used (behind the scenes!) via your choice of template parameter
  *     `Client_session_t`.  As of this writing the following values are available out of the box.
@@ -91,9 +91,15 @@ namespace ipc::transport::struc::shm::rpc
  *       information will have no bearing on your use of capnp-RPC, semantically, but it may eventually be
  *       significant in terms of perf and safety considerations in production code.
  *
+ * The `-> stream` feature (https://capnproto.org/news/#multi-stream-flow-control) has a potential impact on
+ * shared RAM (SHM) use, and possibly on performance.  The way the related *flow control window* is determined
+ * differs from vanilla (non-zero-copy) capnp-RPC's impl (as described in that link).
+ *   - You may control and/or observe the relevant window knob via `this->vat_network()->streaming_flow_window_ki()`.
+ *     See Session_vat_network::streaming_flow_window_ki() for further info.
+ *
  * ### For Flow-IPC-savvy users / Direct SHM use ###
  * The above was written with a slant toward those who are familiar with capnp-RPC but may know next to nothing
- * about Flow-IPC at large.  However Client_context does provide access to the rest of Flow-IPC my exposing
+ * about Flow-IPC at large.  However Client_context does provide access to the rest of Flow-IPC by exposing
  * most (not quite all) features of ipc::session::Session.  The latter is a (the!) gateway to the rest
  * of Flow-IPC which is full-featured.  To wit:
  *   - You may obtain the Flow-IPC `Session` object, after a successful sync_connect().  Call it `S`.
@@ -101,7 +107,7 @@ namespace ipc::transport::struc::shm::rpc
  *       construct C++ native objects (including arbitrary STL-compliant containers-of-containers-of-...),
  *       then transmit them to the opposing process and more.  (See ipc::shm::stl namespace doc header.)
  *       - As you can see in other docs, `S->lend_object()` and `S->borrow_object()` enable sharing native SHM-stored
- *         objects between processes.  To transmit the handle blobs return by `->lend_object()`, you can use
+ *         objects between processes.  To transmit the handle blobs returned by `->lend_object()`, you can use
  *         your shiny capnp-RPC session and/or any additional `Channel`s you opened via sync_connect()
  *         (or any other technique for that matter... but why would you need even more?!).
  *   - You may open direct-use channels (ipc::transport::Channel) via the optional args to sync_connect().
@@ -116,12 +122,12 @@ namespace ipc::transport::struc::shm::rpc
  * Some features of ipc::session::Session are not usable through a Client_context.
  *   - The capnp-metadata exchange (ipc::session::Session::mdt_builder() et al) at session-open is not available.
  *     This would have complicated the API, and we figure the capnp-RPC layer is more than sufficient for any
- *     negotiation or information exchange you desire!
+ *     negotiation or information exchange you could possibly desire!
  *   - While you can call `S->open_channel()` (which would open a new `Channel` *after* the session is connected),
  *     it will not work, as there is no way to specify a passive-channel-open handler.  This would have, again,
- *     complicated the API -- and we'd want to perhaps make it available in a `kj`-style way (promises, promises).
+ *     complicated the API -- and we'd want to perhaps make it available in a KJ-style way (promises, promises).
  *     - This is a possibility for future work.  However (1) capnp-RPC is available, even for native-handle exchange
- *       if desired ("capability passing" -- see capn-RPC's `getFd()`); and (2) even for vanilla Flow-IPC work
+ *       if desired ("capability passing" -- see capnp-RPC's `getFd()`); and (2) even for vanilla Flow-IPC work
  *       most prefer to use the at-session-open channels (which are available in Client_context), so open_channel()
  *       et al are in the first place an advanced feature.
  *
@@ -149,8 +155,8 @@ namespace ipc::transport::struc::shm::rpc
  *         A concrete type a-la session::Client_session but SHM-enabled.  As of this writing
  *         out of the box the available types are listed above under "How to use `Client_context`."
  *         Naturally, the opposing Context_server must be parameterized in a compatible fashion.
- *         (E.g., `Client_context<ipc::session::shm::classic::Client_session<>>` <=>
- *                `Context_server<ipc::session::shm::classic::Session_server<>>`.)
+ *         (E.g., `Client_context<ipc::session::shm::classic::Client_session<...knobs...>>` <=>
+ *                `Context_server<ipc::session::shm::classic::Session_server<...same-knobs...>>`.)
  */
 template<typename Client_session_t>
 class Client_context :
@@ -184,10 +190,14 @@ public:
   /**
    * Constructs us without establishing the capnp-RPC session.  Use sync_connect() to establish it.
    *
+   * @warning `cli_app_ref` and `srv_app_ref` must remain alive throughout `*this` lifetime: their *addresses*
+   *          are stored and accessed at various points later.  This is consistent with the intended
+   *          global-registry lifecycle of `Client_app`/`Server_app`/`App`; see the `struct` session::App doc header.
+   *
    * @param logger_ptr
    *        Logger to use for logging subsequently.  (You may use null to forego this completely.)
    * @param kj_io
-   *        A `kj` event loop context.
+   *        A KJ event loop context.
    * @param cli_app_ref
    *        Properties of this client application.  The address is copied; the object is not copied.
    * @param srv_app_ref
@@ -232,6 +242,9 @@ public:
    *     said `Session`).  So: one immediate op; and then you can make an `RpcSystem` and go capnp-RPC-ing happily; and
    *     (optionally) make use of certain Flow-IPC `Session` features as well (see below and class doc header).
    *
+   * @note Upon entering PEER state (i.e., on success of sync_connect()): knobs of interest are available
+   *       through vat_network() method which gives access to the core Session_vat_network.
+   *
    * ### How does it know "where" the Session_server is listening? / Why non-blocking and synchronous? ###
    * Please see session::Client_session::sync_connect() doc header's similar section.  It is best to be aware
    * of this as background.
@@ -240,9 +253,14 @@ public:
    * If invoked already in PEER state, this returns `false` and otherwise does nothing.  The following assumes
    * otherwise (that it was invoked properly in NULL state).  Then:
    *
-   * On success returns `true`.  On connect fail, throws an exception `flow::error::Runtime_error`.  The `Error_code`
-   * may be accessed via `.code()` (also `.code().message()`, `.what()`) of the exception object.
-   * #Error_code generated:
+   * On success returns `true`.  On connect fail, throws an exception:
+   *   - `flow::error::Runtime_error` (which is an `std::runtime_error` which is an `std::exception`)
+   *     if it's from originating in Flow-IPC proper;
+   *   - `kj::Exception` if from capnp internals;
+   *   - generic `std::exception` and `...` might also be possible.
+   *
+   * In case of `Runtime_error`: The `Error_code` may be accessed via `.code()` (also `.code().message()`,
+   * `.what()`) of the exception object.  #Error_code generated:
    *   - interprocess-mutex-related errors (probably from boost.interprocess) w/r/t reading the CNS (PID file),
    *     file-related system errors w/r/t reading the CNS (PID file) (see Session_server doc header for background),
    *   - error::Code::S_CLIENT_NAMESPACE_STORE_BAD_FORMAT (bad CNS contents),
@@ -258,16 +276,19 @@ public:
    *     internal-use socket-connection could not be obtained from OS by opposing side),
    *   - possibly others.
    *
-   * `this->sync_connect()` may retried, if an exception is thrown.
+   * You may retry `this->sync_connect()`, if an exception is thrown.  (If an exception is thrown, post-conditions:
+   * `*this` remains in NULL state; (if applicable) `*init_channels_by_srv_req` is empty;
+   * (if applicable) `*init_channels_by_cli_req_pre_sized` is filled with NULL-state objects, container size
+   * unchanged.)
    *
-   * @note To comport with capnp-RPC/`kj` style code flow, this API does not have a standard Flow-style
+   * @note To comport with capnp-RPC/KJ style code flow, this API does not have a standard Flow-style
    *       optional `Error_code*` out-arg through which to communicate success/errors instead of exceptions if desired;
    *       it shall always fire an exception on error, otherwise return `true`.
    *
-   * ### Seriously, isn't it common to be able to perform a socket-async-connect technique? ###
-   * In a local-IPC context: In short, actually, no.  (Even in a networked context the potential asynchronicity --
-   * waiting -- really comes from the fact that connection establishment with a *listening* server involves
-   * networked round trips which are not instant; not the case here.)
+   * ### Seriously, why no `async_connect()`?  Isn't it common to perform an async socket-connect operation? ###
+   * In a local-IPC context: In short, actually, no: there is no waiting involved.  (Even in a networked context
+   * the potential asynchronicity -- waiting -- really comes from the fact that connection establishment with
+   * a *listening* server involves networked round trips which are not instant; in our local case it is instant.)
    *
    * There is however a to-do elsewhere (which would propagate here as well) for a relatively exotic
    * wait-until-server-pops-up operation.
@@ -314,6 +335,9 @@ public:
    * no sync_connect() has succeeded or been invoked at all.  The #Vat_network is valid if and only if
    * `*this` exists.
    *
+   * @see `vat_network()->streaming_flow_window_ki()` is a perf-knob of potential interest accessible through here.
+   *       See Session_vat_network::streaming_flow_window_ki() doc header(s).
+   *
    * See Session_vat_network docs; but in short, generally, once constructed this guy is used ~identically
    * to `capnp::TwoPartyVatNetwork`.
    *
@@ -358,6 +382,7 @@ private:
 
   /**
    * Impl of sync_connect() and sync_connect_sans_shm_transport().
+   *
    * @param init_channels_by_cli_req_pre_sized
    *        See `sync_connect*()`.
    * @param init_channels_by_srv_req
@@ -372,7 +397,7 @@ private:
 
   // Data.
 
-  /// `kj` event loop context.
+  /// KJ event loop context.
   kj::AsyncIoContext* const m_kj_io;
 
   /// See ctor.  Stored in case we must re-initialize #m_session, if sync_connect() only partially succeeds.
@@ -394,9 +419,9 @@ private:
    * `Channel` -- still open, or at least not closed on our account -- around until destruction.
    *
    * ### Rationale: Why keep it open? ###
-   * See sync_connect_impl() body for details.  In short: when we destroy the `Channel` (<=> close our-side
+   * See sync_connect_impl() body for details.  In short: When we destroy the `Channel` (<=> close our-side
    * endpoint), the Context_server may well happen to not have quite gotten to consume the native-handle off
-   * the us=>them half-pipe yet.  It's a bidirectional pipe, and certain technicalities mean that
+   * the us-to-them half-pipe yet.  It's a bidirectional pipe, and certain technicalities mean that
    * after our-side closing happens, their-side receiving won't succeed; so instead we simply keep it open:
    * they can read it whenever.  The cost is mainly the extra endpoint resource (in practice, a socket).
    * (It *is* possible to make it work, essentially by handling the channel with full minimalism as entirely
@@ -512,66 +537,69 @@ bool Client_context<Client_session_t>::sync_connect_impl
   // else
 
   /* We request 1 channel for capnp-RPC; plus any they might want for their own purposes.
-   * Naturally the Session_context knows this agreement.
+   * Naturally the Server_context knows this agreement.
    * (See @todo in class doc header regarding protocol negotiation though.) */
   Channels actual_init_channels_by_cli{1 + (init_channels_by_cli_req_pre_sized
                                               ? init_channels_by_cli_req_pre_sized->size()
                                               : 0)};
-  FLOW_LOG_INFO("rpc::Client_ctx [" << *this << "]: capnp-RPC connected requested.  Synchronous, non-blocking "
+  FLOW_LOG_INFO("rpc::Client_ctx [" << *this << "]: capnp-RPC connect requested.  Synchronous, non-blocking "
                 "ipc::session::Session connect initiating; on success will hook up the "
                 "[zero-copy-enabled? = [" << (!sans_shm_transport) << "]] Session_vat_network.");
-#ifndef NDEBUG
-  const bool ok =
-#endif
-  m_session.sync_connect(m_session.mdt_builder(), &actual_init_channels_by_cli, nullptr, init_channels_by_srv_req);
-  assert(ok && "We had a NULL-state Client_session and tried .sync_connect(); why would it have reported otherwise?");
-
-  /* .sync_connect() would have thrown on error (as advertised) (probably other guy isn't up; m_network remained null).
-   * Otherwise we carry on: */
-
-  if (init_channels_by_cli_req_pre_sized && (!init_channels_by_cli_req_pre_sized->empty()))
-  {
-    assert(actual_init_channels_by_cli.size() > 1);
-    std::move(++actual_init_channels_by_cli.begin(), actual_init_channels_by_cli.end(),
-              init_channels_by_cli_req_pre_sized->begin());
-    actual_init_channels_by_cli.resize(1);
-  }
-  assert(actual_init_channels_by_cli.size() == 1);
-  auto& rpc_setup_channel = actual_init_channels_by_cli.front();
-
-  /* Per our protocol with the opposing Context_server (see also the class doc header @todo regarding
-   * Protocol_negotiator), rpc_setup_channel exists for one purpose: to convey -- from us to them -- a single
-   * native handle, namely one end of a pre-connected stream-socket pair, over which the two Session_vat_network
-   * peer objects (ours and theirs) shall subsequently transmit their (small) messages.  So: create said
-   * socket pair; send one end over the channel and flush it (the channel's work is then done); and feed
-   * the other end to our Session_vat_network.
-   *
-   * Why not just have Session_vat_network use rpc_setup_channel's own low-level transport (skipping this
-   * dance)?  Answer: kj/capnp async-I/O machinery (kj::AsyncIoStream et al) requires a stream-type
-   * socket; whereas the channel's own transport is not, in general, that.  (As of this writing it is typically a
-   * SOCK_SEQPACKET-type Unix-domain socket; depends on compile-time Native_socket_stream_cfg settings; but that
-   * detail is not the point really: The point is we want it to work regardless of how Native_socket_stream might
-   * itself be internally implemented/how it may or may not expose related resources to the world.  Cf.: this Channel
-   * type can, generically, transmit `Native_handle`s, end of; so we use it for its purpose (one of them).)
-   *
-   * Compared to many other places in session-land of Flow-IPC, wherein typically the server-designated side
-   * creates resources/client consumes them, here we do the reverse: we connect_pair(); they (briefly)
-   * await one of the results of that.  Why?  Answer: Then we can keep everything synchronous -- no kj async/promise
-   * dance (we just sync_connect(), send_native_handle(), and async_end_sending(); the latter is ~instant
-   * in practice, so it's in effect synchronous too).  They already need to do the kj async/promise dance
-   * on account of the Session::async_accept() step; so the async_receive...() is tacked on to that. */
 
   Native_handle local_hndl;
   Native_handle remote_hndl;
   try
   {
+#ifndef NDEBUG
+    const bool ok =
+#endif
+    m_session.sync_connect(m_session.mdt_builder(), &actual_init_channels_by_cli, nullptr, init_channels_by_srv_req);
+    assert(ok && "We had a NULL-state Client_session and tried .sync_connect(); why would it have reported otherwise?");
+
+    /* .sync_connect() would have thrown on error (as advertised) (probably other guy isn't up; m_network remained
+     * null).  Otherwise we carry on: */
+
+    if (init_channels_by_cli_req_pre_sized && (!init_channels_by_cli_req_pre_sized->empty()))
+    {
+      assert(actual_init_channels_by_cli.size() > 1);
+      std::move(++actual_init_channels_by_cli.begin(), actual_init_channels_by_cli.end(),
+                init_channels_by_cli_req_pre_sized->begin());
+      actual_init_channels_by_cli.resize(1);
+    }
+    assert(actual_init_channels_by_cli.size() == 1);
+    auto& rpc_setup_channel = actual_init_channels_by_cli.front();
+
+    /* Per our protocol with the opposing Context_server (see also the class doc header @todo regarding
+     * Protocol_negotiator), rpc_setup_channel exists for one purpose: to convey -- from us to them -- a single
+     * native handle, namely one end of a pre-connected stream-socket pair, over which the two Session_vat_network
+     * peer objects (ours and theirs) shall subsequently transmit their (small) messages.  So: create said
+     * socket pair; send one end over the channel and flush it (the channel's work is then done); and feed
+     * the other end to our Session_vat_network.
+     *
+     * Why not just have Session_vat_network use rpc_setup_channel's own low-level transport (skipping this
+     * dance)?  Answer: KJ/capnp async-I/O machinery (kj::AsyncIoStream et al) requires a stream-type
+     * socket; whereas the channel's own transport is not, in general, that.  (As of this writing it is typically a
+     * SOCK_SEQPACKET-type Unix-domain socket; depends on compile-time Native_socket_stream_cfg settings; but that
+     * detail is not the point really: The point is we want it to work regardless of how Native_socket_stream might
+     * itself be internally implemented/how it may or may not expose related resources to the world.  Cf.: this Channel
+     * type can, generically, transmit `Native_handle`s, end of; so we use it for its purpose (one of them).)
+     *
+     * Compared to many other places in session-land of Flow-IPC, wherein typically the server-designated side
+     * creates resources/client consumes them, here we do the reverse: we connect_pair(); they (briefly)
+     * await one of the results of that.  Why?  Answer: Then we can keep everything synchronous -- no KJ async/promise
+     * dance (we just sync_connect(), send_native_handle(), and *end_sending(); the latter is ~instant
+     * in practice, so it's in effect synchronous too).  They already need to do the KJ async/promise dance
+     * on account of the Session::async_accept() step; so the async_receive...() is tacked on to that. */
+
     {
       Task_engine task_engine; // Purely a formality required by the Peer_socket (boost.asio) API.
       Peer_socket local_sock{task_engine};
       Peer_socket remote_sock{task_engine};
       Error_code sys_err_code;
       connect_pair(local_sock, remote_sock, sys_err_code);
-      // (Could've used the throwing version of that API, but our message-and-such is arguably nicer.)
+      /* (Could've used the throwing version of that API, but our message-and-such is arguably nicer.  Plus
+       * technically we promised to throw Runtime_error, if the problem is within Flow-IPC proper which this
+       * arguably is.) */
       if (sys_err_code)
       {
         throw Runtime_error{sys_err_code, "Client_context::sync_connect_impl(): connect_pair()"};
@@ -595,7 +623,8 @@ bool Client_context<Client_session_t>::sync_connect_impl
       /* Send the graceful-close after that.  Neither the above nor this will internally hit would-block
        * (fresh channel), in any OS we know of at least, but that's irrelevant anyway: For reasons
        * we're about to explain, we're keeping *m_rpc_setup_channel alive indefinitely anyway.  So there's no
-       * need for the typical async_end_sending(F) (where F() signals us to proceed, or what-not) dance. */
+       * need for the typical async_end_sending(F) (where F() signals us to proceed <=> anything pending has been sent)
+       * dance. */
       m_rpc_setup_channel->hndl_snd()->end_sending();
 
       /* Sent: the other side has (or on its schedule will have) its own copy of the handle;
@@ -623,13 +652,13 @@ bool Client_context<Client_session_t>::sync_connect_impl
        * Client-side in reality all the required ops are synchronous and will not require us to hook-up an
        * async-wait functor (it can be a no-op).  Server-side, though, there's the async-read which will mean
        * start_receive_...(F) will need an F() that'll actually do the wait; and in Context_server that needs to
-       * be hooked to the kj event-loop; hence an FdObserver or similar.  The best way to do *that* would be
-       * to provide a utility module that links our sync_io-pattern API with kj-style event loops -- itself
-       * an excellent to-do potentially useful for kj users orthogonally to anything else.  Until then it's too
+       * be hooked to the KJ event-loop; hence an FdObserver or similar.  The best way to do *that* would be
+       * to provide a utility module that links our sync_io-pattern API with KJ-style event loops -- itself
+       * an excellent to-do potentially useful for KJ users orthogonally to anything else.  Until then it's too
        * hairy to custom-write it just for Context_server, just to save a socket taken from the OS.
        *
        * @todo (The "to-do" mentioned in preceding to-do) Elsewhere develop a public utility that links
-       * kj event loops to sync_io-pattern APIs, in spirit similarly to what we already provide for boost.asio
+       * KJ event loops to sync_io-pattern APIs, in spirit similarly to what we already provide for boost.asio
        * event loops.  (Make it available to users; and can also use in the preceding to-do ourselves, for the
        * Context_server side.)
        *
@@ -676,12 +705,14 @@ bool Client_context<Client_session_t>::sync_connect_impl
                         std::move(local_hndl), 0);
     }
     assert(local_hndl.null() && "Session_vat_network ctor promises to consume the transport handle immediately.");
+    /* (That *m_network construction might throw KJ or capnp error; we are not sure exactly all the specific
+     * possibilities of what would throw.) */
   }
   catch (...)
   {
     /* Get the message for logging, if we can.  (This dispatcher fuss, as opposed to just catching
-     * `const exception&` originally: kj::Exception -- possible from Session_vat_network ctor -- does not
-     * derive from std::exception.  kj in fact *throws* an internal sub-class deriving from both, so the
+     * `const exception&`, is because: kj::Exception -- possible from Session_vat_network ctor -- does not
+     * derive from std::exception.  KJ in fact *throws* an internal sub-class deriving from both, so the
      * middle arm below is only for a bare-thrown kj::Exception; can't hurt.) */
     string msg;
     try { throw; }
@@ -689,10 +720,10 @@ bool Client_context<Client_session_t>::sync_connect_impl
     catch (const kj::Exception& exc) { msg = exc.getDescription().cStr(); }
     catch (...) { msg = "(unknown exception type)"; }
 
-    FLOW_LOG_WARNING("rpc::Client_ctx [" << *this << "]: ipc::session::Session [" << m_session << "] connected "
-                     "fine; however the capnp-RPC transport setup -- socket-pair creation/transmission or "
-                     "Session_vat_network ctor -- threw exception [" << msg << "] which we shall re-throw; "
-                     "NULLifying Session first to get `*this` back to pristine state.");
+    FLOW_LOG_WARNING("rpc::Client_ctx [" << *this << "]: A step of capnp-RPC connect (the ipc::session::Session "
+                     "[" << m_session << "] connect itself; socket-pair creation; socket-handle transmission; "
+                     "Session_vat_network ctor) threw exception [" << msg << "] which we shall re-throw; "
+                     "getting `*this` and out-args back to pristine state first.");
     /* Close whatever socket-pair handles remain in our custody (each of these no-ops on null handle;
      * in particular Session_vat_network ctor -- if reached -- consumes (nullifies) local_hndl immediately;
      * in any case we cannot double-close no matter when it threw). */
@@ -700,16 +731,30 @@ bool Client_context<Client_session_t>::sync_connect_impl
     local_hndl.close();
     m_rpc_setup_channel.reset(); // Get this back to pristine state too.
 
+    /* As advertised: Undo anything we might have placed into the init-channels container(s) upon successful
+     * sync_connect() if any.  (We don't bother trying to bring back whatever random stuff they had
+     * in *init_channels_by_cli_req_pre_sized; placing NULL-state Channel{}s there is fine.) */
+    if (init_channels_by_cli_req_pre_sized)
+    {
+      *init_channels_by_cli_req_pre_sized = Channels{init_channels_by_cli_req_pre_sized->size()};
+    }
+    if (init_channels_by_srv_req)
+    {
+      init_channels_by_srv_req->clear();
+    }
+
+    /* Whether Session connect failed (leaving it in NULL state) or succeeded (PEER state) before the throw:
+     * replace it with a fresh NULL-state one; a subsequent retry starts from scratch. */
     m_session = Session_obj{get_logger(), m_cli_app_ref, m_srv_app_ref,
                             [this](const Error_code& err_code) { on_session_hosed(err_code); }};
-    assert((!m_network) && "If Session_vat_network ctor threw -- m_network should still be null!");
+    assert((!m_network) && "If Session_vat_network ctor (last step) threw -- m_network should still be null!  Bug?");
 
     throw;
   }
   // Got here: noice!  (m_network ctor logged just fine, so let's not.)
 
   return true;
-} // Client_context::sync_connect()
+} // Client_context::sync_connect_impl()
 
 template<typename Client_session_t>
 typename Client_context<Client_session_t>::Vat_network*
@@ -722,7 +767,7 @@ template<typename Client_session_t>
 const typename Client_context<Client_session_t>::Vat_network*
   Client_context<Client_session_t>::vat_network() const
 {
-  return const_cast<Client_context*>(this)->vat_network(); // Rare use of const_cast<> that's not an anti-pattern.
+  return const_cast<Client_context*>(this)->vat_network();
 }
 
 template<typename Client_session_t>
@@ -736,7 +781,7 @@ template<typename Client_session_t>
 const typename Client_context<Client_session_t>::Session_obj*
   Client_context<Client_session_t>::session() const
 {
-  return const_cast<Client_context*>(this)->session(); // Rare use of const_cast<> that's not an anti-pattern.
+  return const_cast<Client_context*>(this)->session();
 }
 
 template<typename Client_session_t>

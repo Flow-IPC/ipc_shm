@@ -35,8 +35,8 @@ namespace ipc::transport::struc::shm::rpc
 /**
  * An object of this type facilitates the establishment, in server style, of zero-copy-enabled capnp-RPC
  * conversation(s) with opposing process's or processes' `Client_context`s.  On each successful connect, it
- * produces a Server_context, each of which represents one such
- * conversation until its destruction, exactly mirroring the opposing Client_context in PEER state.
+ * produces a Server_context, each of which represents one such conversation until its destruction,
+ * exactly mirroring the opposing Client_context in PEER state.
  *
  * @note No Server_context object coming from a `this->accept()` must exist past the destruction of `*this`.
  *       Context_server maintains certain important commonly shared resources, including SHM, and essentially
@@ -50,7 +50,7 @@ namespace ipc::transport::struc::shm::rpc
  *      section is appropriate here too; we assume knowledge of that.
  *
  * ### Background ###
- * Armed with the aforemention knowledge, consider the server side of things.  For each potential capnp-RPC
+ * Armed with the aforementioned knowledge, consider the server side of things.  For each potential capnp-RPC
  * session, individually, the steps are fairly similar: accept (instead of connect); then a Server_context
  * shall bundle the required `VatNetwork` and Flow-IPC session::Session (in PEER state).  From that point on
  * it's exactly the same: make `RpcSystem`, etc.
@@ -62,21 +62,22 @@ namespace ipc::transport::struc::shm::rpc
  *     `Promise` which is essentially fulfilled once an async-accept succeeds.  It'll contain chiefly
  *     the resulting Server_context.  Armed with that you proceed ~identically to how you might on the opposing side.
  *     - (Aside: Customarily with capnp-RPC, the guy who connected is *also* set-up to be the client-side of the
- *       "interface bootstrap" operation, and conversely the guy that accepted provides the bootstrap interface
- *       *implementation*.  I.e. they'd use (typically) `makeRpcClient()` and `makeRpcServer()` respectively.
+ *       "interface bootstrap" operation, and conversely the guy that accepted provides the bootstrap
+ *       interface *implementation*.  I.e. they'd use (typically) `makeRpcClient()` and `makeRpcServer()` respectively.
  *       Reminder: That is not mandatory at all; which side chooses to connect versus accept is entirely
  *       orthogonal to how one uses the resulting `VatNetwork` after that.)
  *     - If this session-server accepts conversations with 2+ different session-client applications
  *       (e.g., `/bin/x` and `/bin/y` are different apps), then you may need to identify which one you're talking
  *       to w/r/t a given Server_context.  Use session::Server_session::client_app() accessor to yield the
  *       session::Client_app (including session::Client_app::m_name).  So if accept() returned a `Promise`, and
- *       it was fulfilled with object `X` then: `X.context()->session()->client_app()->m_name'.
+ *       it was fulfilled with object `X` then: `X.m_context->session()->client_app()->m_name`.
  *   - Client_context represents a single conversation: once in PEER state, it cannot exit that state and cannot
- *     be reused to connect again, or in parallel.  Similarly Server_context is the mirror image of that (except
+ *     be reused to connect again, nor in parallel.  Similarly Server_context is the mirror image of that (except
  *     it is *always* in PEER state to begin-with).  However a Context_server can generate *multiple* active/overlapping
  *     conversations with opposing peers.  E.g., on one successful accept() it is possible/typical to invoke another.
  *     Thus 2+ `Server_context`s can be active simultaneously.
- *     - Of course this is not mandatory.  Many server applications only a single ongoing session.  Up to you!
+ *     - Of course this is not mandatory.  Many server applications maintain only a single ongoing session in a
+ *       process.  Up to you!
  *
  * As to the latter point: Context_server is *not* intended to represent an automatically self-perpetuating
  * server (accepting machine).  It is up to you to invoke accept(), when you want a potential new session.
@@ -99,19 +100,19 @@ namespace ipc::transport::struc::shm::rpc
  *   // It is listening now.
  *   decltype(ctx_srv)::Server_context_obj::Ptr ctx_ptr;
  *   ctx_srv.accept() // Somewhat more advanced args to accept() are optional.
- *          .then(auto&& accept_result) // Type of accept_result is Context_server::Accept_result: a simple struct.
+ *          .then([&](auto&& accept_result) // Type of accept_result is Context_server::Accept_result: a simple struct.
  *   {
  *     ctx_ptr = std::move(accept_result.m_context);
  *   }).wait(kj_async_io_context.waitScope);
  *   auto& ctx = *ctx_ptr;
- *   // ctx is exactly equivalent to opposing Client_context post-.sync_accept()!  E.g.:
- *   auto& network = ctx.vat_network();
+ *   // ctx is exactly equivalent to opposing Client_context post-.sync_connect()!  E.g.:
+ *   auto* network = ctx.vat_network();
  *   // ...Create RpcSystem using `network` -- off you go!
  *   ~~~
  *
  * (Of course this is KJ: You can combine the above promise chain with whatever would kick off your RPC-system
  * loop after the above snippet, so there's only one `.wait(kj_async_io_context.waitScope)` to combine both
- * async ops.  Or have two .`wait()`s in series.  Explaining KJ/promises -- not in our scope here!)
+ * async ops.  Or have two .`wait()`s in series.  Explaining KJ/promises: not in our scope here.)
  *
  * Bottom line: Once you've got your `ctx` as above, the API/semantics of it and the opposing-side Client_context
  * in PEER state (after `.sync_connect()`) are *exactly* identical.  So see its doc header w/r/t PEER state!
@@ -119,7 +120,7 @@ namespace ipc::transport::struc::shm::rpc
  * may be of interest:
  *   - session::Server_session::client_app() (explained above).
  *   - (SHM-classic) session::shm::classic::Session_server::app_shm() (cross-session SHM arena).
- *     - session::shm::classic::Session_server::pool_size_limit() (before affected accept()).
+ *     - session::shm::classic::Session_server::pool_size_limit_mi() (before affected accept()).
  *   - (SHM-jemalloc) session::shm::arena_lend_jemalloc::Session_server::app_shm() (cross-session SHM arena).
  *
  * @tparam Session_server_t
@@ -127,8 +128,8 @@ namespace ipc::transport::struc::shm::rpc
  *         out of the box the available types mirror those listed in Client_context doc header under
  *         "How to use `Client_context`."
  *         Naturally, the opposing Client_context must be parameterized in a compatible fashion.
- *         (E.g., `Client_context<ipc::session::shm::classic::Client_session<>>` <=>
- *                `Context_server<ipc::session::shm::classic::Session_server<>>`.)
+ *         (E.g., `Client_context<ipc::session::shm::classic::Client_session<...knobs...>>` <=>
+ *                `Context_server<ipc::session::shm::classic::Session_server<...same-knobs...>>`.)
  */
 template<typename Session_server_t>
 class Context_server :
@@ -157,6 +158,8 @@ public:
   /// Bundles the results of a successful accept(); until then all elements default-cted.
   struct Accept_result
   {
+    // Data.
+
     /// The `kj::Own`-like handle to established Server_context opposite the other guy's PEER-state Client_context.
     typename Server_context_obj::Ptr m_context;
     /// Opened init-channels, numbering as many as you requested (see accept() doc header); may well be `.empty()`.
@@ -172,6 +175,12 @@ public:
    * `Client_context`s.  Use accept() to establish such a capnp-RPC (zero-copy-ified) session by yielding (mainly)
    * a Server_context (exactly identical in capabilities to the opposing PEER-state Client_context).
    *
+   * @warning `srv_app_ref` and `cli_app_master_set_ref` -- and the `Client_app`s to which the latter
+   *          (transitively) refers -- must remain alive throughout `*this` lifetime, as well as that of
+   *          any `Server_context` yielded by accept(): their *addresses* are stored and accessed at
+   *          various points later.  This is consistent with the intended global-registry lifecycle of
+   *          `Server_app`/`Client_app`/`App`; see the `struct` session::App doc header.
+   *
    * ### Context (white-boxy info) ###
    * Listening to incoming capnp-RPC connections means to first listen for Flow-IPC session-open attempts,
    * as documented briefly in session::Session_server ctor doc header; namely (to briefly recap)
@@ -181,31 +190,31 @@ public:
    *
    * ### Error conditions ###
    * This ctor, on failure, throws an exception `flow::error::Runtime_error`.  The `Error_code`
-   * may be accessed via `.code()` (also `.code().message()`, `.what()`) of the exception object.
-   * #Error_code generated: those documented for session::Server_session ctor; as of this writing:
+   * may be accessed via `.code()` (also `.code().message()`, `.what()`) of the exception object.  #Error_code
+   * generated: those documented for session::Server_session ctor; as of this writing:
    *   - interprocess-mutex-related errors (probably from boost.interprocess) w/r/t writing the CNS (PID file);
    *   - file-related system errors w/r/t writing the CNS (PID file) (see `Session_server` docs for background);
    *   - errors emitted by transport::Native_socket_stream_acceptor ctor (see that ctor's doc header; but note
    *     that they comprise name-too-long and name-conflict errors which ipc::session specifically exists to
    *     avoid).
    *
-   * @note To comport with capnp-RPC/`kj` style code flow, this API does not have a standard Flow-style
+   * @note To comport with capnp-RPC/KJ style code flow, this API does not have a standard Flow-style
    *       optional `Error_code*` out-arg through which to communicate success/errors instead of exceptions if desired;
    *       it shall always fire an exception on error, otherwise succeed.
    *
    * @param logger_ptr
    *        Logger to use for logging subsequently.  (You may use null to forego this completely.)
    * @param kj_io
-   *        A `kj` event loop context.
+   *        A KJ event loop context.
    * @param srv_app_ref
    *        Properties of this server application.  The address is copied; the object is not copied.
    *        Among other things this lists identification info about which opposing applications are allowed to
    *        speak with us.
    * @param cli_app_master_set_ref
    *        The set of all known `Client_app`s.  The address is copied; the object is not copied.
-   *        Technically, from our POV, it need only list the `Client_app`s whose names are
+   *        Technically, from our PoV, it need only list the `Client_app`s whose names are
    *        in `srv_app_ref.m_allowed_client_apps`.  Refer to session::App doc header for best practices on
-   *        maintaining this master list in practice.
+   *        maintaining this master list.
    */
   explicit Context_server(flow::log::Logger* logger_ptr, kj::AsyncIoContext* kj_io,
                           const session::Server_app& srv_app_ref,
@@ -234,7 +243,7 @@ public:
   // Methods.
 
   /**
-   * Asynchronously awaits for an opposing Client_context to request capnp-RPC session, returning a KJ `Promise`
+   * Asynchronously waits for an opposing Client_context to request capnp-RPC session, returning a KJ `Promise`
    * that is fulfilled on successful establishment of a Server_context (in PEER state); or rejected with
    * a `kj::Exception` indicating what went wrong.  Essentially this convenience operation has two main aspects:
    *   - It bundles together the acceptance of a Flow-IPC session::Session and the creation of a `capnp::VatNetwork`
@@ -245,12 +254,16 @@ public:
    *   - It expresses this semantically in a KJ/capnp-RPC-style API, integrating with a KJ event loop using
    *     promises and exceptions.
    *
+   * @note Upon getting the Accept_result::m_context, which is a new PEER-state Server_context, you may be
+   *       interested in knobs accessible through Server_context::vat_network(), which gives access to the
+   *       Session_vat_network core of the resulting Server_context.
+   *
    * @see the other accept() overload which allows access to a couple side Flow-IPC ipc::session features via
    *      additional args.
    *
    * Multiple accept() calls can be queued while no session-open is pending; though informally we suggest:
-   *   - (either) accept() (yielding eventually a fulfilled promise), handle it until it is finished
-   *     (disconnected), then:
+   *   - (either) accept() (yielding eventually a fulfilled promise), handle it until it is finished (disconnected),
+   *     then:
    *     - (either) exit;
    *     - (or) rinse/repeat (issue the next accept()... etc.);
    *   - (or) accept() (yielding eventually a fulfilled promise), and once it is fulfilled:
@@ -286,8 +299,7 @@ public:
    *     hand-shaking.  Less likely is the system being out of some resource such as reaching a SHM kernel object
    *     limit or something.  Since the likeliest reason is recoverable, and could happen when generally
    *     things are fine, it is best to assume that and continue as normal.
-   *     - But!  Ensure any such errors are carefully investigated (e.g., trigger alerts humans must look at...
-   *       or whatever).
+   *     - But!  Ensure any such errors are carefully investigated (e.g., trigger alerts humans must look at).
    *     - Mechanically the easiest way too heed this is: `.then(F, E)`, where `F()` the usual success handler --
    *       while `E` is the error handler; which would in this case log but not re-propagate the exception as
    *       the default does (blowing up your event loop).
@@ -332,6 +344,10 @@ public:
    *   - It shall expect the function to return the # of init-channels we are requesting.
    *   - Then it will do so (and fulfill the `Promise` as normal).
    *
+   * @note Attention: We reiterate: n_init_channels_by_srv_req_func() is called from an unspecified thread,
+   *       not the KJ-event-loop; while the rest of asynchronous action happens in the KJ event loop.
+   *       This might be surprising, so just please be aware.
+   *
    * @tparam N_init_channels_by_srv_req_func
    *         Function type matching signature
    *         `size_t F(const session::Client_app& app, size_t n_init_channels_by_cli_req)`, where
@@ -357,23 +373,27 @@ public:
    * and on the opposing side.
    *
    * Starting with the former:
-   *   - Asynchronously, in an unspecified thread that is not the calling thread of this method,
-   *     during the session-establishment process, Flow-IPC shall call your function
-   *     `transport_method_func()`.
+   *   - Asynchronously, in the KJ event loop thread, during the session-establishment process,
+   *     Flow-IPC shall call your function `transport_method_func()`.
    *   - It will give it 1 basic piece of info that might be useful in making the decision.
    *   - It shall expect the function to return `true` to, indeed, disable zero-copy transport; or `false`
    *     to proceed with zero-copy (as the other accept() overloads would).
    *   - Then it will do so (and fulfill the `Promise` as normal).
    *
-   * Assuming that *does* return `true`, some knobs must be set appropriately at the opposing process.  To wit:
+   * Assuming `transport_method_func` *does* return `true`, some knobs must be set appropriately at the opposing
+   * process.  To wit:
    *   - If using Ez_rpc_client: use ctor arg `sans_shm_transport = true`.
    *   - If using Client_context: use Client_context::sync_connect_sans_shm_transport().
    *   - If using Session_vat_network: use the "special mode" ctor arg (see Session_vat_network ctor doc headers).
    *   - Or use `capnp::VatNetwork` or `capnp::EzRpcClient`.
    *
+   * @note Attention: We reiterate: `n_init_channels_by_srv_req_func()` is called from an unspecified thread,
+   *       not the KJ-event-loop; while the rest of asynchronous action (including `transport_method_func()`)
+   *       happens in the KJ event loop.  This might be surprising, so just please be aware.
+   *
    * @tparam Transport_method_func
    *         Function type matching signature
-   *         `bool F(const session::Client_app& app`, where `app` identifies the opposing application.
+   *         `bool F(const session::Client_app& app)`, where `app` identifies the opposing application.
    * @tparam N_init_channels_by_srv_req_func
    *         See accept() overload 2.
    * @param enable_hndl_transport
@@ -383,6 +403,20 @@ public:
    * @param transport_method_func
    *        See above.
    * @return See accept() overload 2.
+   *
+   * @todo For the rpc::Context_server::accept() advanced overload(s) that take an
+   * `n_init_channels_by_srv_req_func` arg, it would be a nice improvement to the contract to
+   * guarantee issuing the call to that user-function from the KJ-event-loop thread, like the rest of
+   * the async action.  (E.g., the following async parts execute in the KJ style: promise fulfillment;
+   * `transport_method_func()` call if applicable.)  This API change would not be
+   * a breaking change.  The reason it is not already done is that the Flow-IPC
+   * capnp-RPC-support layer treats the non-RPC-aware ipc::session layer (normally used directly by user but not here)
+   * as a black box; and the session::Session_server::async_accept() contract -- in this particular detail --
+   * did not need to be KJ-friendly (or even KJ-aware) in its design, so it was not.  (capnp-RPC support did not
+   * exist at the time.)  So the way session::Session_server invokes `n_init_channels_by_srv_req_func()` is
+   * inverted versus what the KJ flow needs.  To implement this improvement, session::Session_server would need an
+   * added async hook for the give-me-the-desired-channel-count step, and Context_server::accept() impl
+   * would make use of it.
    */
   template<typename N_init_channels_by_srv_req_func, typename Transport_method_func>
   kj::Promise<Accept_result> accept(bool enable_hndl_transport,
@@ -390,7 +424,7 @@ public:
                                     Transport_method_func&& transport_method_func);
 
   /**
-   * Returns pointer to #Session_server_obj.  The #Session_server_obj is valid if and only if `*this` exists.
+   * Returns pointer to #Session_server_obj.  The #Session_server_obj remains valid, if and only if `*this` exists.
    *
    * @see class doc header for overview of which features accessible through this #Session_server_obj are available
    *      (and which are not).
@@ -398,6 +432,32 @@ public:
    * @return See above.
    */
   const Session_server_obj& session_server() const;
+
+  /**
+   * The value, if not zero, to which each Server_context produced by accept() shall have its
+   * `vat_network()->streaming_flow_window_ki()` set, before the accept() promise is fulfilled with it; zero
+   * means each such Session_vat_network is left at its own default
+   * (Session_vat_network_base::S_STREAMING_FLOW_WINDOW_KI).  The latter (zero) is the initial value.
+   *
+   * @see Session_vat_network::streaming_flow_window_ki() for what the knob means and when to bother with it.
+   *
+   * @see the mutator overload, which can be used to change this value.
+   *
+   * @return See above.
+   */
+  size_t streaming_flow_window_default_ki() const;
+
+  /**
+   * Sets the value as returned by `streaming_flow_window_default_ki()` accessor.  See its doc header.
+   *
+   * It applies to `Server_context`s produced by accept() promises fulfilled after this call; any already-produced
+   * ones are unaffected (though one can always set their `vat_network()->streaming_flow_window_ki()` directly).
+   * It has no effect on `Server_context`s operating in non-zero-copy mode (see `transport_method_func` in accept()).
+   *
+   * @param limit_ki_or_0
+   *        The new value.  Zero means: do not touch each new Session_vat_network's default.
+   */
+  void streaming_flow_window_default_ki(size_t limit_ki_or_0);
 
   /**
    * Implements `kj::TaskSet::ErrorHandler` API.  In our case logs a WARNING.  Do not call directly (as a user).
@@ -422,10 +482,11 @@ private:
   {
   public:
     // Types.
+
     /// Movable, uncopyable smart-pointer handle to a mutable `*this`.
     using Ptr = boost::movelib::unique_ptr<Server_context_impl>;
 
-    // Constructors/destructor.  @todo Maybe can just do `using Server_context_obj::Server_context_obj;`?)
+    // Constructors/destructor.  (@todo Maybe can just do `using Server_context_obj::Server_context_obj;`?)
 
     /**
      * Ctor: forwards to super-class identical ctor.
@@ -444,7 +505,10 @@ private:
 
   // Data.
 
-  /// `kj` event loop context.
+  /// See streaming_flow_window_default_ki().
+  size_t m_streaming_flow_window_default_ki;
+
+  /// KJ event loop context.
   kj::AsyncIoContext* const m_kj_io;
 
   /// Session in NULL state (until sync_connect() succeeds) or PEER state (subsequently).
@@ -464,6 +528,7 @@ Context_server<Session_server_t>::Context_server(flow::log::Logger* logger_ptr, 
                                                  const session::Server_app& srv_app_ref,
                                                  const session::Client_app::Master_set& cli_app_master_set_ref) :
   flow::log::Log_context(logger_ptr, Log_component::S_RPC),
+  m_streaming_flow_window_default_ki(0),
   m_kj_io(kj_io),
   m_session_server(get_logger(), srv_app_ref, cli_app_master_set_ref,
                    // Let it throw on catastrophic error!  E.g., writing CNS (PID) file; dealing with IPC-mutex.
@@ -541,7 +606,7 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
     uint8_t m_protocol_dummy_payload;
 
     /* If the continuation below never consumed m_hndl (canceled; or threw first), it is ours to close.
-     * m_chan must die first: its thread is what writes m_hndl. */
+     * m_chan must die first: its thread is what potentially writes m_hndl. */
     ~Transport_hndl_receive() { m_chan = decltype(m_chan){}; m_hndl.close(); }
   };
 
@@ -578,8 +643,9 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
    * the culprit) and reject instead of fulfilling, through that same fulfiller. */
 
   /* The promise for the final result.  Technicality: at the end, we'll need to .fork() it so as to both return
-   * it and add it to m_kj_tasks for auto-canceling from dtor; this makes it required that the type is
-   * copyable, not just movable; so throw a shared_ptr<> around it (hence Accept_result_ptr, not Accept_result). */
+   * it and add a branch to m_kj_tasks (so that a rejection the user never observes is at least logged via
+   * taskFailed()); this makes it required that the type is copyable, not just movable; so throw a shared_ptr<>
+   * around it (hence Accept_result_ptr, not Accept_result). */
   auto accept_result_paf = newPromiseAndFulfiller<Accept_result_ptr>();
 
   /* The promise -- which can/will be fulfilled from thread W -- that kicks off the promise chain.
@@ -701,8 +767,7 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
       (&rcv->m_hndl, Blob_mutable{&rcv->m_protocol_dummy_payload,
                                   sizeof(Transport_hndl_receive::m_protocol_dummy_payload)},
        // (Something uses function<> inside; captures must be copyable; wrap in shared_ptr.)
-       [hndl_w_to_u_fulfiller
-          = make_shared<decltype(hndl_w_to_u_paf.fulfiller)>(std::move(hndl_w_to_u_paf.fulfiller))]
+       [hndl_w_to_u_fulfiller = make_shared<decltype(hndl_w_to_u_paf.fulfiller)>(std::move(hndl_w_to_u_paf.fulfiller))]
          (const Error_code& err_code, size_t)
     {
       // We are in a thread W (of the async-I/O channel).
@@ -740,15 +805,14 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
         return;
       }
       // else: got the transport handle.  The channel's work is done; destroy it.
-      rcv->m_chan = decltype(rcv->m_chan){};
+      rcv->m_chan = {};
 
       // Everything is ready.  Make Server_context.  Its contract says it could throw Kj_exception.
 
       auto& init_chans_cli = session_accept_result->m_init_channels_by_cli_req;
       auto& session = session_accept_result->m_target_session;
 
-      /* Use the Server_context_impl (inner private class) facade to access the otherwise `protected`
-       * Server_context ctor. */
+      // Use the Server_context_impl facade to access the otherwise internal Server_context ctor.
       typename Server_context_impl::Ptr srv_context_impl;
       try
       {
@@ -771,27 +835,34 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
       }
       // Got here: noice!
 
+      if (m_streaming_flow_window_default_ki != 0)
+      {
+        // (No effect in non-zero-copy mode but harmless.)
+        srv_context_impl->vat_network()->streaming_flow_window_ki(m_streaming_flow_window_default_ki);
+      }
+      // else { It'll use its own default.  Either way it can be overridden, same as what we do 2 lines up. }
+
       FLOW_LOG_INFO("rpc::Ctx_server [" << *this << "]: "
                     "In async-accept promise continuation reacting to session-async-accept which succeeded; "
                     "zero-copy-enabled? = [" << (!sans_shm_transport) << "]; "
                     "and we created the PEER-state Server_context with all the goodies (Vat_network et al).  "
                     "Returning all results via fulfiller to inform original caller.");
 
-      /* Can't make_shared<X>() while aggregate-initializing X ({ a, b, c }).  So it was either use `new`
-       * (a bit slower due to less efficient allocation internally, but perf irrelevant in our context), or
-       * move-construct from a direct-initialized thing into make_shared().  Let's just do the former. */
+      // Can't make_shared<X>() while aggregate-initializing X ({ a, b, c }).  Perf doesn't matter => use `new`.
       accept_result_fulfiller
         ->fulfill(Accept_result_ptr
                     {new Accept_result
                        { typename Server_context_obj::Ptr
                            {static_cast<Server_context_obj*>(srv_context_impl.release())},
-                         // Up-cast uptr<X_impl> -> uptr<X>.  X_impl adds no data, and there is no polymorphism! --^
+                         // Up-cast uptr<X_impl> -> uptr<X>.  X_impl adds no data, and there is no polymorphism!
                          std::move(session_accept_result->m_init_channels_by_srv_req),
                          std::move(init_chans_cli) }});
     })); // m_kj_tasks.add(hndl_w_to_u_paf.then()
   })); // m_kj_tasks.add(thread_w_to_u_paf.then()
 
-  // We want to return the final promise but also save it to auto-cancel it if we get destroyed first.
+  /* We want to return the final promise but also keep a branch of it in m_kj_tasks, so that if it is rejected,
+   * and the user is not listening (dropped their branch), taskFailed() still logs it.  (Cancellation-on-dtor is
+   * already provided by the upstream chain having been added to m_kj_tasks above; this is not about that.) */
 
   auto accept_result_promise_fork = accept_result_paf.promise.fork();
   m_kj_tasks.add(accept_result_promise_fork.addBranch().ignoreResult());
@@ -815,11 +886,27 @@ const typename Context_server<Session_server_t>::Session_server_obj&
 }
 
 template<typename Session_server_t>
+size_t Context_server<Session_server_t>::streaming_flow_window_default_ki() const
+{
+  return m_streaming_flow_window_default_ki;
+}
+
+template<typename Session_server_t>
+void Context_server<Session_server_t>::streaming_flow_window_default_ki(size_t limit_ki_or_0)
+{
+  FLOW_LOG_TRACE("rpc::Ctx_server [" << *this << "]: User setting streaming flow control window default "
+                 "for subsequently accepted sessions to [" << limit_ki_or_0 << "Ki] (0 = leave each at its default); "
+                 "replacing current setting [" << m_streaming_flow_window_default_ki << "Ki].");
+  m_streaming_flow_window_default_ki = limit_ki_or_0;
+}
+
+template<typename Session_server_t>
 void Context_server<Session_server_t>::taskFailed(kj::Exception&& exc)
 {
   FLOW_LOG_WARNING("rpc::Ctx_server [" << *this << "]: "
-                   "A promise was rejected (presumably an error such as accept failure), and the user did "
-                   "not catch it, so we will just log it: [" << exc.getDescription().cStr() << "].");
+                   "A promise was rejected (presumably an error such as accept failure) -- either an internal "
+                   "one, or one the user did not catch -- so we will just log it: "
+                   "[" << exc.getDescription().cStr() << "].");
 }
 
 template<typename Session_server_t>
