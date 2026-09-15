@@ -22,6 +22,7 @@
 #include "ipc/transport/struc/shm/error.hpp"
 #include "ipc/transport/struc/shm/capnp_msg_builder.hpp"
 #include "ipc/transport/struc/shm/serializer_stats.hpp"
+#include "ipc/transport/struc/shm/schema/detail/serialization.capnp.h"
 #include <flow/error/error.hpp>
 #include <boost/move/make_unique.hpp>
 

@@ -43,17 +43,20 @@ $Cxx.namespace("ipc::transport::struc::shm::schema::detail");
 
 # --- END Header.
 
-# Types used by schema below.
-
-using Common = import "/ipc/transport/struc/shm/schema/common.capnp";
-using ShmHandle = Common.ShmHandle;
-
 # Main schema.
+
+# Note: Both structs below store the SHM-handle blob as a bare Data field, rather than via the public-facing
+# Common.ShmHandle wrapper struct.  These are hot-path per-message headers; a capnp struct nesting costs
+# a word (8 bytes) per level, and the wrapper would add nothing here.  (Common.ShmHandle remains as a convenience
+# for user schemas.)  The field is named identically to Common.ShmHandle.shmHandleSerialization on purpose:
+# struc::shm::capnp_set_lent_shm_handle() and capnp_get_shm_handle_to_borrow() work on any struct with a Data
+# field of that name; and Capnp_message_builder::lend() and Capnp_message_reader::borrow() rely on those.
 
 struct ShmTopSerialization
 {
-  segmentListInShm @0 :ShmHandle;
-  # Interpret as: Arena::Handle<list<Blob>> from the concept as required by shm::Builder and
+  shmHandleSerialization @0 :Data;
+  # The SHM-handle blob, as returned by the SHM-session's lend_object() (to be passed to the opposing
+  # borrow_object()).  Interpret as: Arena::Handle<list<Blob>> from the concept as required by shm::Builder and
   # shm::Reader class templates (see their doc headers).
   # In the pointed-to structure, each list<> element is capnp-serialized segment.
   # - Each element Blob::size() is the size used by the serialization, in that segment;
@@ -62,8 +65,7 @@ struct ShmTopSerialization
   # Hence a SegmentArrayMessageReader is to be fed each Blob's [begin, end()) range, and the resulting
   # MessageReader is the zero-copy deserialization of the originally mutated schema.
   #
-  # For info on serializing the list<Blob> into ShmHandle and deserializing from Shm_handle to list<Blob>,
-  # see Common.ShmHandle.  The bottom line is, this ShmHandle will be a mere small blob regardless of how
+  # The bottom line is, this blob is small (and of a fixed size for a given SHM-provider) regardless of how
   # huge/complex the list<Blob>-serialized data structure is.
 }
 
@@ -71,16 +73,16 @@ struct CapnpRpcMsgTopSerialization
 {
   # See Session_vat_network.
 
-  shmTopSerialization @0 :ShmTopSerialization;
-  # The star of the show as usual.  The handle is to the in-SHM serialization of messages created and used by
-  # capnp::RpcSystem et al.  We usually don't rely on the following fact, except (and this is rare) for cross-layer
-  # optimization purposes and for exposition.  The fact: the schema encoded in that in-SHM message is
-  # capnp's internal rpc::Message.
+  shmHandleSerialization @0 :Data;
+  # The star of the show as usual.  Identical in meaning to ShmTopSerialization.shmHandleSerialization: the handle
+  # is to the in-SHM serialization of messages created and used by capnp::RpcSystem et al.  We usually don't rely on
+  # the following fact, except (and this is rare) for cross-layer optimization purposes and for exposition.
+  # The fact: the schema encoded in that in-SHM message is capnp's internal rpc::Message.
 
   isShortLivedMsg @1 :Bool = true;
   # Helps implement the TwoPartyVatNetwork-inspired/compatible short-lived-message optimization;
   # Session_vat_network internally uses (see comments in e.g. ctor) this.  `true` means the rpc::Message
-  # in shmTopSerialization is of a type such that it can be discarded completely before handling the next
+  # in shmHandleSerialization is of a type such that it can be discarded completely before handling the next
   # in-message; `false` means it cannot and may need to be stored.  (This has probably less impact in
   # Session_vat_network than vanilla TwoPartyVatNetwork, as in our case the copying involved in "to be stored"
   # is minimal -- just the SHM handle -- while the rpc::Message continues to sit quietly in SHM, never copied.

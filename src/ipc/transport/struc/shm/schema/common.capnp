@@ -36,11 +36,20 @@ $Cxx.namespace("ipc::transport::struc::shm::schema");
 
 # --- END Header.
 
-struct ShmHandle # XXXshould we get rid of the wrapper -- make ShmHandle = Data? Save some IPC-bytes? I didn't think in terms of such details pre-perf-dive. Look at all hot-path things (don't forget capnp-RPC-supporting schema)
+struct ShmHandle
 {
-  serialization @0 :Data;
+  # A convenience wrapper for user schemas: a field of this type holds a SHM-handle blob.
+  #
+  # (Flow-IPC internal impl notes)
+  # Being a struct, it costs one capnp word of nesting overhead over a bare Data field.  This is ~immaterial
+  # in a user schema; whereas for Flow-IPC's own per-message hot-path headers we store the Data blob in a pre-existing
+  # struct, possibly containing other field(s) alongside it.  We do that there to save those bytes along said
+  # hot-paths.  See detail/serialization.capnp.  Those structs name their Data field identically to ours, so that
+  # the helpers mentioned just below work on any of them.)
+
+  shmHandleSerialization @0 :Data;
   # shm::Builder::Session-concept pointee impl lend_object() returns this as a C++ flow::util::Blob_sans_log_context
   # as of this writing.
-  # Use transport::struc::shm::capnp_set_lent_shm_handle() to mutate after geting Blob from lend_object().
+  # Use transport::struc::shm::capnp_set_lent_shm_handle() to mutate after getting Blob from lend_object().
   # Use transport::struc::shm::capnp_get_shm_handle_to_borrow() to access before passing Blob to borrow_object().
 }

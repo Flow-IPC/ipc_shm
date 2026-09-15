@@ -52,8 +52,7 @@ set(SRCS
     ipc/shm/classic/pool_arena_stats.cpp
     ipc/transport/struc/shm/error.cpp
     ipc/transport/struc/shm/rpc/detail/ez_rpc_kj_io.cpp
-    ipc/transport/struc/shm/serializer_stats.cpp
-    ipc/transport/struc/shm/util.cpp)
+    ipc/transport/struc/shm/serializer_stats.cpp)
 set(CAPNP_SCHEMAS
     ipc/transport/struc/shm/schema/common.capnp
     ipc/transport/struc/shm/schema/detail/serialization.capnp)
@@ -95,6 +94,7 @@ set(HDRS
     ipc/transport/struc/shm/serializer.hpp
     ipc/transport/struc/shm/serializer_stats.hpp
     ipc/transport/struc/shm/shm_fwd.hpp
+    ipc/transport/struc/shm/util.hpp
     ${CAPNP_SCHEMAS}) # Export these like any regular headers...
 
 # ...but also, at the proper time, generate .c++ from them (add to SRCS) and .h also from them (add to HDRS).

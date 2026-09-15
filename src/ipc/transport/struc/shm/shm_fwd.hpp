@@ -69,7 +69,8 @@ class Capnp_message_reader;
 
 /**
  * Utility that saves the result of a `Shm_session1::lend_object<T>(const shared_ptr<T>&)` into
- * the given capnp-generated `ShmHandle`-typed field.  On the deserializing end, one
+ * the given capnp-generated struct's `shmHandleSerialization :Data` field -- typically a `ShmHandle`-typed field
+ * in your schema.  On the deserializing end, one
  * can get back this value via capnp_get_shm_handle_to_borrow() and pass it to
  * `Shm_session2::borrow_object<T>()` to yield a `shared_ptr<T>` equivalent to the original passed to `lend_object()`.
  *
@@ -82,26 +83,38 @@ class Capnp_message_reader;
  *     - vice versa;
  *   - shm::Builder::Session pointee, shm::Reader::Session pointee.
  *
+ * It is fine to call this repeatedly on the same `*shm_handle_root` (e.g., when re-sending the same message):
+ * the already-allocated `Data` is reused rather than orphaned (capnp `initX()` does not reuse space).
+ *
+ * @tparam Capnp_root_builder
+ *         Capnp-generated `X::Builder`, where `struct X` declares field `shmHandleSerialization :Data`.
+ *         The typical one is `schema::ShmHandle::Builder`, `ShmHandle` being the public convenience type for
+ *         this purpose; but any struct with such a field works (Flow-IPC internally uses this on certain hot-path
+ *         header structs, where the field sits directly among other fields, saving a level of nesting).
  * @param shm_handle_root
- *        Non-null (or behavior undefined/assertion may trip) pointer to `ShmHandle` builder to mutate.
+ *        Non-null (or behavior undefined/assertion may trip) pointer to builder to mutate.
  * @param lend_result
  *        What `lend_object<T>()` returned.  Not `.empty()`, or behavior undefined (assertion may trip).
  *        Reminder: if that returned `.empty()`, the session is likely hosed, and you cannot transmit SHM objects
  *        between the two endpoints, so there is no point in calling us.
  */
-void capnp_set_lent_shm_handle(schema::ShmHandle::Builder* shm_handle_root,
+template<typename Capnp_root_builder>
+void capnp_set_lent_shm_handle(Capnp_root_builder* shm_handle_root,
                                const flow::util::Blob_sans_log_context& lend_result);
 
 /**
  * Utility that's the reverse of capnp_set_lent_shm_handle() to be invoked on the deserializing side.
  *
+ * @tparam Capnp_root_reader
+ *         Capnp-generated `X::Reader` counterpart to the `Capnp_root_builder` given to capnp_set_lent_shm_handle().
  * @param shm_handle_root
- *        `ShmHandle` reader to access.  Behavior undefined if was not set by capnp_set_lent_shm_handle().
+ *        Reader to access.  Behavior undefined if was not set by capnp_set_lent_shm_handle().
  * @param arg_to_borrow
  *        Shall be set to what to pass to `borrow_object<T>()` (non-null pointer or behavior undefined/assertion
  *        may trip).  `arg_to_borrow->get_logger()` shall not be modified; so set it to what you want, if you want.
  */
-void capnp_get_shm_handle_to_borrow(const schema::ShmHandle::Reader& shm_handle_root,
+template<typename Capnp_root_reader>
+void capnp_get_shm_handle_to_borrow(const Capnp_root_reader& shm_handle_root,
                                     flow::util::Blob_sans_log_context* arg_to_borrow);
 
 /**

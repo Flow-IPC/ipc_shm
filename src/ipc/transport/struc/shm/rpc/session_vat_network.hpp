@@ -21,6 +21,7 @@
 #include "ipc/transport/struc/shm/rpc/rpc_fwd.hpp"
 #include "ipc/transport/struc/shm/capnp_msg_builder.hpp"
 #include "ipc/transport/struc/shm/serializer.hpp"
+#include "ipc/transport/struc/shm/schema/detail/serialization.capnp.h"
 #include "ipc/transport/struc/util.hpp"
 #include "ipc/util/native_handle.hpp"
 #include <boost/move/unique_ptr.hpp>
@@ -1064,8 +1065,7 @@ void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::
     capnp_msg_in_heap_root.setIsShortLivedMsg(false);
   }
 
-  auto shm_top_serialization_root = capnp_msg_in_heap_root.initShmTopSerialization();
-  const bool ok = m_capnp_msg_in_shm.lend(&shm_top_serialization_root, m_daddy->m_shm_lnd_brw);
+  const bool ok = m_capnp_msg_in_shm.lend(&capnp_msg_in_heap_root, m_daddy->m_shm_lnd_brw);
   /* Now the message in SHM is safe from deallocation until both m_capnp_msg_in_shm is destroyed with *this,
    * *and* the receiver MessageReader (see Rpc_msg_in_impl) has had .borrow() called on it, and that MessageReader
    * is destroyed with its containing Rpc_msg_in_impl.  (Corollary: if the SHM-handle never reaches the receiver --
@@ -1200,8 +1200,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::Rpc_ms
   namespace rpc = ::capnp::rpc;
 
   Error_code err_code;
-  m_capnp_msg_in_shm.borrow(m_msg->getBody().template getAs<schema::detail::CapnpRpcMsgTopSerialization>()
-                                            .getShmTopSerialization(),
+  m_capnp_msg_in_shm.borrow(m_msg->getBody().template getAs<schema::detail::CapnpRpcMsgTopSerialization>(),
                             daddy->m_shm_lnd_brw, &err_code);
   KJ_REQUIRE(!err_code,
              "Was asked to accept a capnp-in-message by the RPC-system, but Capnp_message_reader::borrow() "

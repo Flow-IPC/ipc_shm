@@ -25,7 +25,7 @@
 #include "ipc/shm/stl/stateless_allocator.hpp"
 #include "ipc/shm/shm.hpp"
 #include "ipc/transport/struc/shm/error.hpp"
-#include "ipc/transport/struc/shm/schema/detail/serialization.capnp.h"
+#include "ipc/transport/struc/shm/util.hpp"
 #include <flow/error/error.hpp>
 #include <boost/interprocess/containers/list.hpp>
 #include <cstdint>
@@ -170,8 +170,14 @@ public:
    * such as one that outputs a mere `Blob`.  The existing one is suitable for the main use-case which is internally by
    * shm::Builder; but Capnp_message_builder is also usable as a `capnp::MessageBuilder` directly.  If a user were to
    * indeed leverage it in that latter capacity, they may want to transmit/store the SHM-handle some other way.
-   * Note that as of this writing the direct-use-by-general-user-as-`MessageBuilder` use-case is supported "just
-   * because" it can be; nothing in particular needed it.
+   *
+   * @internal
+   *
+   * For context: As of this writing Flow-IPC internals use these types for `Capnp_root_builder`:
+   *   - `schema::detail::ShmTopSerialization::Builder` (used by shm::Builder),
+   *   - `schema::detail::CapnpRpcMsgTopSerialization::Builder` (used by rpc::Session_vat_network).
+   *
+   * @endinternal
    *
    * @tparam Session_t
    *         Let `S1 = Session_t` and `S2` be the `Session_t` in the opposing Capnp_message_reader::borrow() method.
@@ -187,6 +193,9 @@ public:
    *         session::shm::arena_lend::jemalloc::Client_session + session::shm::arena_lend::jemalloc::Server_session;
    *         shm::Pool_arena + ditto;
    *         session::shm::arena_lend::jemalloc::Shm_session + ditto.
+   * @tparam Capnp_root_builder
+   *         See capnp_set_lent_shm_handle(), to which this is forwarded: a capnp-generated `X::Builder`, where
+   *         `struct X` declares field `shmHandleSerialization :Data`.
    * @param capnp_root
    *        The target SHM-handle serialization root to populate as noted above.  Untouched if `false` returned.
    * @param shm_session
@@ -195,9 +204,8 @@ public:
    *         Assuming general buglessness of the code up to this point the latter means the session is permanently
    *         down; which is eminently possible in a normally functioning system.
    */
-  template<typename Session_t>
-  bool lend(schema::detail::ShmTopSerialization::Builder* capnp_root,
-            Session_t* shm_session);
+  template<typename Session_t, typename Capnp_root_builder>
+  bool lend(Capnp_root_builder* capnp_root, Session_t* shm_session);
 
   /**
    * Implements `MessageBuilder` API.  Invoked by capnp, as the user mutates via `Builder`s.  Do not invoke directly.
@@ -340,14 +348,11 @@ public:
    * the usual techniques of our inherited #Capnp_msg_reader_interface (a/k/a `capnp::MessageReader`) -- most
    * notably `.getRoot<...>()` -- to access the SHM-stored data.
    *
-   * @todo Would be nice to provide a more-general counterpart to existing
-   * Capnp_message_reader::borrow() (in addition to that one which interprets a SHM-handle-encoding capnp structure),
-   * such as one that takes a mere `Blob`.  The existing one is suitable for the main use-case which is internally by
-   * shm::Reader; but Capnp_message_reader is also usable as a `capnp::MessageReader` directly.  If a user were to
-   * indeed leverage it in that latter capacity, they may want to transmit/store the SHM-handle some other way.
-   *
    * @tparam Session_t
    *         See Capnp_message_builder::lend() doc header's note for same-named template parameter.
+   * @tparam Capnp_root_reader
+   *         See capnp_get_shm_handle_to_borrow(), to which this is forwarded: the `X::Reader` counterpart of the
+   *         `Capnp_root_builder` given to the opposing Capnp_message_builder::lend().
    * @param capnp_root
    *        The SHM-handle serialization root to interpret.
    *        So if Capnp_message_builder::lend() used the `Builder` to set it, this is the `Reader` counterpart to
@@ -366,9 +371,8 @@ public:
    *        of the serialization in SHM, because its `borrow_object()` method indicated the session is down, or the
    *        information transmitted over IPC was in some way invalid).
    */
-  template<typename Session_t>
-  void borrow(const schema::detail::ShmTopSerialization::Reader& capnp_root,
-              Session_t* shm_session, Error_code* err_code = 0);
+  template<typename Session_t, typename Capnp_root_reader>
+  void borrow(const Capnp_root_reader& capnp_root, Session_t* shm_session, Error_code* err_code = 0);
 
   /**
    * Return `false` if and only if borrow() has been invoked at least once, and the last time it was successful.
@@ -488,9 +492,8 @@ Capnp_message_builder<Shm_arena>::~Capnp_message_builder()
 } // Capnp_message_builder::~Capnp_message_builder()
 
 template<typename Shm_arena>
-template<typename Session_t>
-bool Capnp_message_builder<Shm_arena>::lend(schema::detail::ShmTopSerialization::Builder* capnp_root,
-                                            Session_t* shm_session)
+template<typename Session_t, typename Capnp_root_builder>
+bool Capnp_message_builder<Shm_arena>::lend(Capnp_root_builder* capnp_root, Session_t* shm_session)
 {
   using util::Blob_const;
   using flow::util::buffers_dump_string;
@@ -594,11 +597,10 @@ bool Capnp_message_builder<Shm_arena>::lend(schema::detail::ShmTopSerialization:
   }
   // else
 
-  // Target SHM handle (inside capnp struct).  Avoid wasting internal serialization space if already init...()ed.
-  auto capnp_segment_list_in_shm = capnp_root->hasSegmentListInShm() ? capnp_root->getSegmentListInShm()
-                                                                     : capnp_root->initSegmentListInShm();
-  // Copy handle-encoding bits (only a few bytes, by Session contract) from source to target:
-  capnp_set_lent_shm_handle(&capnp_segment_list_in_shm, handle_serialization_blob);
+  /* Target: the `Data` field inside the capnp struct.  (The helper reuses the field's space if already
+   * init...()ed: re-lend() of the same *this is a normal thing.)  Copy handle-encoding bits (only a few bytes,
+   * by Session contract) from source to target: */
+  capnp_set_lent_shm_handle(capnp_root, handle_serialization_blob);
 
   /* Process-count in m_serialization_segments incremented ahead of transmission (this is logged), probably to 2
    * (higher if lend() called more than 1x).
@@ -736,10 +738,9 @@ Capnp_message_reader<Shm_arena>::~Capnp_message_reader()
 }
 
 template<typename Shm_arena>
-template<typename Session_t>
-void Capnp_message_reader<Shm_arena>::borrow
-       (const schema::detail::ShmTopSerialization::Reader& capnp_root,
-        Session_t* shm_session, Error_code* err_code)
+template<typename Session_t, typename Capnp_root_reader>
+void Capnp_message_reader<Shm_arena>::borrow(const Capnp_root_reader& capnp_root,
+                                             Session_t* shm_session, Error_code* err_code)
 {
   using Blob = flow::util::Blob_sans_log_context;
   using ::capnp::word;
@@ -772,10 +773,8 @@ void Capnp_message_reader<Shm_arena>::borrow
    * regular heap, get it out of SHM based on the handle to list<Basic_blob>, where that handle is
    * the one little thing stored in capnp_root. */
   {
-    // capnp_root is a ShmTopSerialization::Reader.
-    const auto capnp_blob_reader = capnp_root.getSegmentListInShm();
     Blob handle_serialization_blob;
-    capnp_get_shm_handle_to_borrow(capnp_blob_reader, &handle_serialization_blob);
+    capnp_get_shm_handle_to_borrow(capnp_root, &handle_serialization_blob);
 
     /* And, as documented in the .capnp file -- and can be seen in Builder -- the handle is
      * to Segments_in_shm, which is the aforementioned list<Basic_blob>.  So interpret it that way
