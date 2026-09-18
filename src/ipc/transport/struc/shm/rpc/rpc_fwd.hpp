@@ -18,6 +18,7 @@
 /// @file
 #pragma once
 
+#include "ipc/transport/struc/shm/rpc/detail/rpc_fwd.hpp"
 #include "ipc/transport/struc/shm/shm_fwd.hpp"
 
 /**

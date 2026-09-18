@@ -18,7 +18,7 @@
 /// @file
 #pragma once
 
-#include "ipc/common.hpp"
+#include "ipc/transport/struc/shm/rpc/detail/rpc_fwd.hpp"
 #include <flow/util/shared_ptr_alias_holder.hpp>
 #include <kj/async-io.h>
 #include <boost/weak_ptr.hpp>
@@ -27,11 +27,6 @@ namespace ipc::transport::struc::shm::rpc
 {
 
 // Types.
-
-/* @todo Technically this stuff should be fwd-declared in a detail/rpc_fwd.hpp.  It's just used so sparingly, that
- * it seemed like overkill.  However... that's how laziness sets in, and spaghetti code takes hold eventually.
- * So... do it sometime.  Or maybe do it once there's more stuff than a single `class` forward-declaration and a
- * single use of that class. */
 
 /**
  * Internal-use thread-local singleton-style access to a `kj::AsyncIoContext` which, for each given thread,
@@ -83,6 +78,6 @@ private:
    *   - Else: The `Ptr` group returned by the last this_thread_obj() is alive.
    */
   static thread_local boost::weak_ptr<Ez_rpc_kj_io> s_this_thread_obj_observer;
-}; // class Ez_rpc_kj_context
+}; // class Ez_rpc_kj_io
 
 } // namespace ipc::transport::struc::shm::rpc

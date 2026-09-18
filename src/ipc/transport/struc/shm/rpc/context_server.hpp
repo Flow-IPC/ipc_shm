@@ -18,8 +18,9 @@
 /// @file
 #pragma once
 
-#include "ipc/transport/struc/shm/rpc/server_context.hpp"
+#include "ipc/transport/struc/shm/rpc/detail/server_context_dtl.hpp"
 #include "ipc/session/app.hpp"
+#include "ipc/session/error.hpp"
 #include "ipc/common.hpp"
 #include <flow/log/log.hpp>
 #include <kj/async.h>
@@ -471,33 +472,6 @@ private:
   // Types.
 
   /**
-   * Data-less facade for Server_context, so that we can access its non-`public` ctor during the accept()
-   * procedure.
-   *
-   * XXXthis was written before I saw the light against doing the protected+facade thing and for instead doing
-   * an attorney thing. E.g., Msg_in_impl = attorney of Msg_in. So do that here. Worst-case, make it a `@todo`.
-   * capnp-RPC hasn't been merged yet, so all else being equal now>later.
-   */
-  class Server_context_impl : public Server_context_obj
-  {
-  public:
-    // Types.
-
-    /// Movable, uncopyable smart-pointer handle to a mutable `*this`.
-    using Ptr = boost::movelib::unique_ptr<Server_context_impl>;
-
-    // Constructors/destructor.  (@todo Maybe can just do `using Server_context_obj::Server_context_obj;`?)
-
-    /**
-     * Ctor: forwards to super-class identical ctor.
-     * @param ctor_args
-     *        Ya know.
-     */
-    template<typename... Ctor_args>
-    Server_context_impl(Ctor_args&&... ctor_args);
-  };
-
-  /**
    * Short-hand for copyable handle to Accept_result; needed in particular when a relevant `kj::Promise` must
    * be `.fork()`ed (Accept_result is not copyable, only movable).
    */
@@ -583,7 +557,6 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
   using Kj_exception = kj::Exception;
   using boost::make_shared;
   using boost::shared_ptr;
-  using boost::movelib::make_unique;
   using Channels = decltype(Accept_result::m_init_channels_by_cli_req);
 
   /* It's like the user-desired Accept_result, but before we can get the Server_context we must get its constituent
@@ -812,15 +785,15 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
       auto& init_chans_cli = session_accept_result->m_init_channels_by_cli_req;
       auto& session = session_accept_result->m_target_session;
 
-      // Use the Server_context_impl facade to access the otherwise internal Server_context ctor.
-      typename Server_context_impl::Ptr srv_context_impl;
+      // Use the Server_context_dtl attorney to access the otherwise internal Server_context ctor.
+      typename Server_context_obj::Ptr srv_context;
       try
       {
-        srv_context_impl = make_unique<Server_context_impl>(get_logger(), m_kj_io,
-                                                            std::move(session),
-                                                            std::move(rcv->m_hndl),
-                                                            enable_hndl_transport,
-                                                            sans_shm_transport);
+        srv_context = Server_context_dtl::ct_base<Server_context_obj>(get_logger(), m_kj_io,
+                                                                      std::move(session),
+                                                                      std::move(rcv->m_hndl),
+                                                                      enable_hndl_transport,
+                                                                      sans_shm_transport);
       }
       catch (const Kj_exception& exc)
       {
@@ -838,7 +811,7 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
       if (m_streaming_flow_window_default_ki != 0)
       {
         // (No effect in non-zero-copy mode but harmless.)
-        srv_context_impl->vat_network()->streaming_flow_window_ki(m_streaming_flow_window_default_ki);
+        srv_context->vat_network()->streaming_flow_window_ki(m_streaming_flow_window_default_ki);
       }
       // else { It'll use its own default.  Either way it can be overridden, same as what we do 2 lines up. }
 
@@ -852,9 +825,7 @@ kj::Promise<typename Context_server<Session_server_t>::Accept_result>
       accept_result_fulfiller
         ->fulfill(Accept_result_ptr
                     {new Accept_result
-                       { typename Server_context_obj::Ptr
-                           {static_cast<Server_context_obj*>(srv_context_impl.release())},
-                         // Up-cast uptr<X_impl> -> uptr<X>.  X_impl adds no data, and there is no polymorphism!
+                       { std::move(srv_context),
                          std::move(session_accept_result->m_init_channels_by_srv_req),
                          std::move(init_chans_cli) }});
     })); // m_kj_tasks.add(hndl_w_to_u_paf.then()
@@ -907,14 +878,6 @@ void Context_server<Session_server_t>::taskFailed(kj::Exception&& exc)
                    "A promise was rejected (presumably an error such as accept failure) -- either an internal "
                    "one, or one the user did not catch -- so we will just log it: "
                    "[" << exc.getDescription().cStr() << "].");
-}
-
-template<typename Session_server_t>
-template<typename... Ctor_args>
-Context_server<Session_server_t>::Server_context_impl::Server_context_impl(Ctor_args&&... ctor_args) :
-  Server_context_obj(std::forward<Ctor_args>(ctor_args)...) // Just forward to their `protected` ctor (we = facade).
-{
-  // Yep.
 }
 
 template<typename Session_server_t>

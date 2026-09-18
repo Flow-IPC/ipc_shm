@@ -87,6 +87,8 @@ set(HDRS
     ipc/transport/struc/shm/rpc/client_context.hpp
     ipc/transport/struc/shm/rpc/context_server.hpp
     ipc/transport/struc/shm/rpc/detail/ez_rpc_kj_io.hpp
+    ipc/transport/struc/shm/rpc/detail/rpc_fwd.hpp
+    ipc/transport/struc/shm/rpc/detail/server_context_dtl.hpp
     ipc/transport/struc/shm/rpc/ez_rpc.hpp
     ipc/transport/struc/shm/rpc/rpc_fwd.hpp
     ipc/transport/struc/shm/rpc/server_context.hpp

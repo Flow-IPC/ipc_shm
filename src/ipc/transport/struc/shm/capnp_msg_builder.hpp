@@ -24,6 +24,7 @@
 #include "ipc/shm/stl/arena_activator.hpp"
 #include "ipc/shm/stl/stateless_allocator.hpp"
 #include "ipc/shm/shm.hpp"
+#include "ipc/transport/struc/error.hpp"
 #include "ipc/transport/struc/shm/error.hpp"
 #include "ipc/transport/struc/shm/util.hpp"
 #include <flow/error/error.hpp>

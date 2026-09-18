@@ -138,11 +138,24 @@ public:
   // Methods.
 
   /**
-   * Reinterpret the capability returned by the non-template overload as implementing the given capnp-`interface`.
+   * Obtain bootstrap interface handle (per other get_main() overload) type-interpreted as implementing
+   * the given capnp-`interface`.  This is the entry-point to capnp-RPC work from the session-client
+   * end.  On the opposing side one thus provides the impl.
    *
    * @note We have omitted the deprecated feature of `EzRpcClient` involving multiple interfaces being exported by
    *       name (`.importCap()`, etc.).  Only the encouraged pattern of using a single bootstrap interface
    *       is available; to wit through get_main().
+   *
+   * ### Possible hidden mess-over ###
+   * Each call issues a fresh bootstrap request and yields a distinct capability handle (a promise-capability
+   * until its first call's response resolves it).  Therefore recommend calling this once and keeping/copying
+   * the returned handle rather than calling `get_main()` per use.  This is only a
+   * small inefficiency for ordinary calls; but for `-> stream` calls it matters: The flow-control rate
+   * (see Session_vat_network::streaming_flow_window_ki()) is accounted per capability handle, so streaming
+   * over handles from separate get_main() calls means separately accounted rates, not one, resulting in
+   * potentially inappropriate flow control.
+   *
+   * This applies to `capnp::EzRpcClient::getMain()` as well incidentally.
    *
    * @tparam Type
    *         For example see our class doc header.
@@ -156,6 +169,9 @@ public:
    * end.  On the opposing side one thus provides the impl.
    *
    * @see other overload that casts it to a particular type.
+   *
+   * ### Possible hidden mess-over ###
+   * Please see the other overload's doc header.
    *
    * @return See above.
    */
@@ -489,7 +505,10 @@ template<typename Client_session_t>
 ::capnp::Capability::Client Ez_rpc_client<Client_session_t>::get_main()
 {
   /* This code in EzRpcClient was curiously optimized; I think maybe get_main() might be called frequently.
-   * So we left that in, even if the specifics are a tiny bit different (more Flow-ish and Flow-IPC-ish). */
+   * So we left that in, even if the specifics are a tiny bit different (more Flow-ish and Flow-IPC-ish).
+   *
+   * (Incidentally per our own doc header, in the context of streaming (at least) it is best not to call this
+   * frequently but rather save a handle.) */
 
   using util::Blob_mutable;
   using Word = ::capnp::word;

@@ -140,11 +140,16 @@ public:
    */
   const Session_obj* session() const;
 
-protected:
+private:
+  // Friends.
+
+  /// Attorney granting internal code (Context_server) access to the private ctor.
+  friend struct Server_context_dtl;
+
   // Constructors.
 
   /**
-   * Constructs us in PEER state.  As of this writing invoked from Context_server internals.
+   * Constructs us in PEER state.  Only callable via Server_context_dtl attorney.
    *
    * To the extent Session_vat_network ctor can throw: this can throw `kj::Exception`.
    *
@@ -167,7 +172,6 @@ protected:
                           Session_obj&& session, Native_handle&& bidir_transport,
                           bool enable_hndl_transport, bool sans_shm_transport);
 
-private:
   // Methods.
 
   /**
