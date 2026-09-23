@@ -100,9 +100,24 @@ public:
    * Constructs us by immediately (and non-blockingly, synchronously) establishing the capnp-RPC session.
    * E.g., obtain the bootstrap interface handle via get_main() immediately on return from this ctor.
    *
-   * @warning `cli_app_ref` and `srv_app_ref` must remain alive throughout `*this` lifetime: their *addresses*
-   *          are stored and accessed at various points later.  This is consistent with the intended
-   *          global-registry lifecycle of `Client_app`/`Server_app`/`App`; see the `struct` session::App doc header.
+   * @warning `cli_app_ref` and `srv_app_ref` must remain alive past this ctor: their *addresses*
+   *          are stored and accessed at various points later.  As usual, unless null, same for `*logger_ptr`.
+   *          If `*this` is the only Ez_rpc_client *or* Ez_rpc_server operating at all times through its life
+   *          (which is typical but not mandatory), then those objects need only stay alive until `*this` is gone.
+   * @warning Otherwise, in more exotic setups: Those objects (`cli_app_ref`, etc.) must stay alive until `*this`'s
+   *          auto-created KJ-loop is gone.  That KJ-loop shall disappear no later the last `Ez_rpc_*` object
+   *          to have been destroyed, such that its lifetime overlapped `*this`'s.  Thus you should keep
+   *          those objects alive past lifetimes of `*this` and of any this-thread-sharing `Ez_rpc_*` object
+   *          that overlapped with `*this` chronologically.
+   *
+   * @internal
+   *
+   * The source of that stuff about lifetimes past `*this` is explained in Session_vat_network "Object lifetimes"
+   * section.  We maintain our own auto-created KJ-loop, and the "Object lifetimes"-recommended
+   * "Guaranteed/easy way" to keep stuff alive (<=> keep them alive past KJ-loop) is great for us... but that
+   * KJ-loop is shared with any concurrent `Ez_rpc_*` guys (Ez_rpc_kj_io mechanism).
+   *
+   * @endinternal
    *
    * ### Error conditions ###
    * This may throw; in fact it will throw, if it is unable to establish a session -- most likely because
@@ -303,9 +318,24 @@ public:
    * which features the relevant `transport_method_func` arg.
    *
    * @warning `srv_app_ref` and `cli_app_master_set_ref` -- and the `Client_app`s to which the latter
-   *          (transitively) refers -- must remain alive throughout `*this` lifetime.  This
-   *          is consistent with the intended global-registry lifecycle of `Server_app`/`Client_app`/`App`; see
-   *          the `struct` session::App doc header.
+   *          (transitively) refers -- must remain alive past this ctor: their *addresses*
+   *          are stored and accessed at various points later.  As usual, unless null, same for `*logger_ptr`.
+   *          If `*this` is the only Ez_rpc_client *or* Ez_rpc_server operating at all times through its life
+   *          (which is typical but not mandatory), then those objects need only stay alive until `*this` is gone.
+   * @warning Otherwise, in more exotic setups: Those objects (`srv_app_ref`, etc.) must stay alive until `*this`'s
+   *          auto-created KJ-loop is gone.  That KJ-loop shall disappear no later the last `Ez_rpc_*` object
+   *          to have been destroyed, such that its lifetime overlapped `*this`'s.  Thus you should keep
+   *          those objects alive past lifetimes of `*this` and of any this-thread-sharing `Ez_rpc_*` object
+   *          that overlapped with `*this` chronologically.
+   *
+   * @internal
+   *
+   * The source of that stuff about lifetimes past `*this` is explained in Session_vat_network "Object lifetimes"
+   * section.  We maintain our own auto-created KJ-loop, and the "Object lifetimes"-recommended
+   * "Guaranteed/easy way" to keep stuff alive (<=> keep them alive past KJ-loop) is great for us... but that
+   * KJ-loop is shared with any concurrent `Ez_rpc_*` guys (Ez_rpc_kj_io mechanism).
+   *
+   * @endinternal
    *
    * ### Error conditions ###
    * This may throw; in fact it will throw, if it is unable to establish a session-server.

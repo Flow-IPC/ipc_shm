@@ -25,6 +25,7 @@
 #include "ipc/transport/struc/util.hpp"
 #include "ipc/util/native_handle.hpp"
 #include <boost/move/unique_ptr.hpp>
+#include <boost/shared_ptr.hpp>
 #include <capnp/any.h>
 #include <capnp/rpc-twoparty.h>
 #include <capnp/rpc.h>
@@ -169,8 +170,8 @@ struct Session_vat_network_base
  * To achieve this:
  *   - Still choose some SHM-provider (perhaps the one you'd use when benchmarking *with* zero-copy; otherwise
  *     any one of them) and therefore template parameters.  Easier yet use an alias like:
- *       - ipc::session::shm::classic::Session_mv::Vat_network;
- *       - ipc::session::shm::arena_lend::jemalloc::Session_mv::Vat_network.
+ *       - `"ipc::session::shm::classic::Client_session::Vat_network"` / `"Server_session::Vat_network"`;
+ *       - `"ipc::session::shm::arena_lend::jemalloc::Client_session::Vat_network"` / `"Server_session::Vat_network"`.
  *   - Pass-in `shm_enabled_session = nullptr` (or, if applicable, `shm_lnd_brw = shm_arena = nullptr`) constructor
  *     arg(s).  Or:
  *   - The aforementioned higher-layer APIs (Client_context + Context_server; Ez_rpc_client + Ez_rpc_server)
@@ -180,6 +181,74 @@ struct Session_vat_network_base
  * `capnp::ReaderOptions` configurable -- analogously to the vanilla `capnp::TwoPartyVatNetwork`.  (Be sure to
  * apply this judiciously to the correct layer of serialization; and document thoughtfully, as the practical
  * perf implications here are different from the vanilla/non-zero-copy use case.)
+ *
+ * Object lifetimes: A caveat
+ * --------------------------
+ * This section applies if you use `*this` directly; or if you use Client_context and Context_server which
+ * is easier.  The `Ez_rpc_*` APIs generally relieve you of having to worry about it.
+ *
+ * A potentially surprising fact, especially to those new to KJ and/or capnp-RPC, is that while a `VatNetwork`
+ * (a `*this` in our context) is indeed a central player in implementing a capnp-RPC system -- and indeed its
+ * lifetime (construction, destruction) is explicitly controlled by its user -- its
+ * destruction does *not* quite mean the RPCing initiated through it is all the way finished.  It
+ * produces objects -- #Rpc_msg_out and #Rpc_msg_in -- per outgoing/incoming capnp-encoded
+ * message which are owned by the KJ loop (`*kj_io` to our ctor), not by `*this`.  These objects
+ * need some of the key resources that a `*this VatNetwork` also needs.  In other words those objects must
+ * stay alive potentially *longer* than `*this` Session_vat_network that originally accepts them via ctor.
+ * Particularly when an RPC system is shutting down, there is typically a danger zone, wherein `VatNetwork`
+ * is gone, but the messages it has produced are still briefly around.  To be more exact:
+ *
+ * ### The objects of concern ###
+ * The objects whole lifetime we must carefully control, so it does not end before all outstanding message-objects
+ * are gone:
+ *   - (If using `shm_enabled_session` ctor form)
+ *     - The SHM-enabled session object, from ipc::session: `*shm_enabled_session`.
+ *     - Objects that `*shm_enabled_session` relies on:
+ *       - (if not null) `Logger*` pointee;
+ *       - the IPC-universe-describing session::App `struct`s.
+ *   - (If using generic ctor form)
+ *     - The SHM-session object `*shm_lnd_brw`: thing with `.lend_object()` and `.borrow_object()`.
+ *     - The SHM-arena object `*shm_arena`: thing with `.construct()`.
+ *     - Objects that those 2 objects rely on.  It depends.
+ *
+ * ### What to do ###
+ * We take either `shm_enabled_session`, or `shm_lnd_brw` + `shm_arena`, by `shared_ptr` handle in ctor.
+ * Therefore you are required to wrap the input object(s) in `shared_ptr` handle(s).  `*this` and `*this`-created
+ * message-objects will hold refs to the object(s) no longer than necessary; once all message-objects and `*this`
+ * are finished, the session/SHM-session/arena can also be destroyed (from our PoV).
+ *
+ * So that covers the ctor-taken objects themselves.  It does not however, necessarily, cover the
+ * "objects that ... relies/rely on" (from the bullet list above).  It is your responsibility to ensure those
+ * objects stay alive past `*this` (naturally) but also the message-objects.  Luckily this should be fairly
+ * easy.
+ *
+ * *Guaranteed/easy way*:
+ * Ensure the relied-upon objects (`Logger`, `App`, ...) shall outlive loop `*kj_io` given to `*this` ctor.
+ *
+ * @note that the `Logger*` mentioned here is not (necessarily) the `Logger*` given to `*this` ctor.  Here
+ *       we mean the `Logger*` given to `*shm_enabled_session`/`*shm_lnd_brw`/`*shm_arena`.
+ *
+ * *Tighter/more involved way*:
+ * The above is easy, but conceivably one might use `*kj_io` for something else after being done with this
+ * round of capnp-RPC; perhaps you'd prefer to not keep the logger/whatever alive at that point.  In that
+ * case:
+ *
+ * Let the event loop run until it has nothing left to do, for instance by using `WaitScope::poll()`, which runs
+ * whatever is ready without blocking; once that returns, and none of your implementation methods is still
+ * executing, nothing of Flow-IPC's remains that uses your `Logger`, `App`s, etc.
+ *
+ * ### This is annoying.... ###
+ * We know.  We didn't want to write the above either.  Unfortunately it's an inescapable consequence of
+ * the way objects in capnp-RPC-over-KJ-loop land interact.  It is not a problem for vanilla capnp-RPC simply
+ * because:
+ *   - it only needs heap memory which is always available (we need SHM and SHM-sessions);
+ *   - it does not do pluggable logging.
+ *
+ * Fortunately, it's easy enough to deal with, if one knows about it.
+ *   - Session stuff is kept alive by `shared_ptr`: so you need not worry about that.
+ *   - `session::App`s are by their nature unchanging, so they're typically always around (at low cost).
+ *   - `Logger*` can be left null (parity with vanilla-capnp-RPC) if desired.  Or keep it around throughout as
+ *     shown above.
  *
  * @internal
  *
@@ -312,6 +381,15 @@ public:
   using Shm_arena = Shm_arena_t;
 
   /**
+   * Shared handle to a #Shm_lender_borrower: how a ctor takes it, and how `*this` and each capnp-message it
+   * (invisibly) generates store it.  See class doc header "Object lifetimes" section for rationale.
+   */
+  using Shm_lender_borrower_ptr = boost::shared_ptr<Shm_lender_borrower>;
+
+  /// Shared handle to a #Shm_arena.  See #Shm_lender_borrower_ptr.
+  using Shm_arena_ptr = boost::shared_ptr<Shm_arena>;
+
+  /**
    * Alias for our base class which incidentally is the interface `VatNetwork<...>`.
    * Incidentally `...` is a few not-exciting types that incidentally represent `TwoPartyVatNetwork`'s -- and
    * our -- two-party-ness.  I.e., there are two parties in the "network" in which we are participating; and
@@ -359,9 +437,18 @@ public:
    * @see streaming_flow_window_ki() which provides a perf- and RAM-use-relevant knob.
    *
    * ### Special mode ###
-   * Use `shm_enabled_session = nullptr` to have `*this` act identically to a regular, non-zero-copy-enabled
+   * Use null `shm_enabled_session` to have `*this` act identically to a regular, non-zero-copy-enabled
    * `TwoPartyVatNetwork`.  This may be useful for fallback, benchmarking, debugging, profiling.
    * streaming_flow_window_ki() has no effect in this mode.
+   *
+   * ### Object lifetimes ###
+   * `*logger_ptr` (if not null) must stay alive while `*this` exists.
+   *
+   * `*shm_enabled_session` (if not null) shall stay alive potentially past `*this` by means of our taking
+   * the `shared_ptr` handle.  However: Maintaining the objects it requires is however your responsibility;
+   * typically `Logger*` pointee (if not null) and session::App pointees.
+   *
+   * @see class doc header "Object lifetimes" section; it explains what to do/how/why.
    *
    * @internal
    *
@@ -378,7 +465,7 @@ public:
    * @param shm_enabled_session
    *        See above.
    *        This is the object with `.borrow_object()` and `.lend_object()` methods available for SHM-object
-   *        cross-process transmission.
+   *        cross-process transmission.  Shared handle: see "Object lifetimes" above.
    * @param bidir_transport
    *        See above.  This shall be used to transmit small messages while holding the actual capnp-messages,
    *        which can be sizable-to-huge, in SHM sans copying.
@@ -389,7 +476,7 @@ public:
    *        for safety and possibly even security.
    */
   explicit Session_vat_network(flow::log::Logger* logger_ptr, kj::AsyncIoContext* kj_io,
-                               Shm_lender_borrower* shm_enabled_session,
+                               Shm_lender_borrower_ptr&& shm_enabled_session,
                                Native_handle&& bidir_transport,
                                unsigned int hndl_transport_limit_or_0 = S_N_MAX_INCOMING_FDS);
 
@@ -420,9 +507,22 @@ public:
    * @see streaming_flow_window_ki() which provides a perf- and RAM-use-relevant knob.
    *
    * ### Special mode ###
-   * Use `shm_lnd_brw = shm_arena = nullptr` to have `*this` act identically to a regular, non-zero-copy-enabled
+   * Use null `shm_lnd_brw` and `shm_arena` to have `*this` act identically to a regular, non-zero-copy-enabled
    * `TwoPartyVatNetwork`.  This may be useful for fallback, benchmarking, debugging, profiling.
    * streaming_flow_window_ki() has no effect in this mode.
+   *
+   * ### Object lifetimes ###
+   * `*logger_ptr` (if not null) must stay alive while `*this` exists.
+   *
+   * `*shm_lnd_brw` (if not null) and `*shm_arena` shall stay alive potentially past `*this` by means of our taking
+   * the `shared_ptr` handle.  However: Maintaining the objects it requires is however your responsibility.
+   *
+   * If one of `*shm_lnd_brw`, `*shm_arena` owns the other -- as an ipc::session::Session
+   * owns its `session_shm()` arena -- we recommend using a `shared_ptr` aliasing constructor: a #Shm_arena_ptr
+   * that points to the arena but shares the session's ownership.  The other ctor uses this technique w/r/t
+   * `ipc::session::Session`-likes storing their `.session_shm()`-accessed arenas.
+   *
+   * @see class doc header "Object lifetimes" section; it explains what to do/how/why.
    *
    * @param logger_ptr
    *        Logger to use for logging subsequently (or null to not log for sure).
@@ -433,10 +533,11 @@ public:
    * @param shm_lnd_brw
    *        See above; see class doc header `Shm_lender_borrower` template parameter explanation.
    *        This is the object with `.borrow_object()` and `.lend_object()` methods available for SHM-object
-   *        cross-process transmission.
+   *        cross-process transmission.  Shared handle: see "Object lifetimes" above.
    * @param shm_arena
    *        See above; see class doc header `Shm_arena` template parameter explanation.
    *        This is the object with `.construct<T>(...)` method available for SHM-object allocation/construction.
+   *        Shared handle: see "Object lifetimes" above.
    * @param bidir_transport
    *        See above.  This shall be used to transmit small messages while holding the actual capnp-messages,
    *        which can be sizable-to-huge, in SHM sans copying.
@@ -445,7 +546,7 @@ public:
    */
   explicit Session_vat_network(flow::log::Logger* logger_ptr, kj::AsyncIoContext* kj_io,
                                bool srv_else_cli,
-                               Shm_lender_borrower* shm_lnd_brw, Shm_arena* shm_arena,
+                               Shm_lender_borrower_ptr&& shm_lnd_brw, Shm_arena_ptr&& shm_arena,
                                Native_handle&& bidir_transport,
                                unsigned int hndl_transport_limit_or_0 = S_N_MAX_INCOMING_FDS);
 
@@ -682,15 +783,23 @@ private:
   /**
    * The user-supplied object with `.borrow_object()` and `.lend_object()` methods that enable the
    * sharing of SHM-stored objects cross-process.  See class doc header template parameter docs for details.
+   * Null if and only if in special mode (no zero-copy).
+   *
+   * @note We keep a shared-handle so that we can give it to `Rpc_msg_*`s we generate, as they may outlive us.
+   *       See "Object lifetimes" in class doc header.
    */
-  Shm_lender_borrower* const m_shm_lnd_brw;
+  const Shm_lender_borrower_ptr m_shm_lnd_brw;
 
   /**
    * The user-supplied object with `.construct<T>()` method that enables the
    * allocation/construction of SHM-stored objects cross-process.
    * See class doc header template parameter docs for details.
+   * Null if and only if #m_shm_lnd_brw is null.
+   *
+   * @note We keep a shared-handle so that we can give it to `Rpc_msg_*`s we generate, as they may outlive us.
+   *       See "Object lifetimes" in class doc header.
    */
-  Shm_arena* const m_shm_arena;
+  const Shm_arena_ptr m_shm_arena;
 
   /**
    * If in ctor `hndl_transport_limit_or_0 == 0`, this is null; else this is the low-level byte-stream
@@ -909,7 +1018,17 @@ public:
 private:
   // Data.
 
-  /// The containing Session_vat_network.
+  /**
+   * The containing Session_vat_network.
+   *
+   * @warning Even though it is the "containing" Session_vat_network, it (`*m_daddy`!) may be destroyed
+   *          **before** `*this` Rpc_msg_out_impl is destroyed.  send() needs `*m_daddy` to be alive,
+   *          and it will be.  Constructor -- obviously ditto.  Anything else that wants to access
+   *          `*m_daddy` must be careful.  In particular: Dtor (if any) of an Rpc_msg_out_impl can definitely
+   *          execute, by way of the owner KJ loop, after `*m_daddy` is destroyed.  Therefore, at least,
+   *          do not access `*m_daddy` (or anything, like a hypothetical also-saved `Logger*`, whose lifetime
+   *          is subordinate to it) from Rpc_msg_out_impl dtor (if any).
+   */
   Session_vat_network* const m_daddy;
 
   /**
@@ -917,6 +1036,31 @@ private:
    * from within #m_capnp_msg_in_shm.
    */
   kj::Own<Rpc_msg_out> m_msg;
+
+  /**
+   * Copy of Session_vat_network::m_shm_lnd_brw: keeps the lender-borrower alive until `*this` is destroyed,
+   * since that can happen after `*m_daddy` is destroyed.  (See #m_daddy.)  Declared before #m_capnp_msg_in_shm,
+   * so that it outlives that (the SHM user).
+   *
+   * @note For some SHM-providers (SHM-jemalloc is one) the existence of a SHM-handle like that stored in
+   *       #m_capnp_msg_in_shm is itself sufficient to keep a SHM-arena and/or SHM-session objects alive.
+   *       For others that is not the case.  We assume the general/safe case.
+   *
+   * ### Why `*this` can outlive `*m_daddy` ###
+   * capnp-RPC keeps each in-progress call's context (which owns the call's incoming message; and, once the
+   * Return is sent, the outgoing one too) alive via a promise it `detach()`es onto the KJ event loop --
+   * it as of this writing does so to make calls uncancelable.  Such a context is owned by the
+   * event loop, not by the #Rpc_system; so it can be destroyed only when the loop next iterates or dies -- which
+   * may be after the user has (in the natural order) destroyed the #Rpc_system, the Session_vat_network, and
+   * the ipc::session::Session behind it.  Its messages' in-SHM serializations must then still be safely
+   * deallocatable/returnable; hence the session (and arena) is kept alive from here.
+   *
+   * Perf cost: a couple of atomic ref-count ops per message, negligible next to the IPC itself.
+   */
+  const Shm_lender_borrower_ptr m_shm_lnd_brw;
+
+  /// Copy of Session_vat_network::m_shm_arena; see #m_shm_lnd_brw.
+  const Shm_arena_ptr m_shm_arena;
 
   /**
    * The `capnp::MessageBuilder` that stores the capnp-serialization needed by the user of a `*this`
@@ -993,6 +1137,14 @@ private:
   kj::Own<Rpc_msg_in> m_msg;
 
   /**
+   * Copy of Session_vat_network::m_shm_lnd_brw: keeps the lender-borrower -- the executor of `.borrow_object()`,
+   * whose disposer the borrowed serialization's handle shall run -- alive until `*this` is destroyed, since
+   * that can happen after the containing Session_vat_network is destroyed.  See Rpc_msg_out_impl::m_shm_lnd_brw
+   * doc header for the full story.  Declared before #m_capnp_msg_in_shm, so that it outlives that.
+   */
+  const Shm_lender_borrower_ptr m_shm_lnd_brw;
+
+  /**
    * The `capnp::MessageReader` that stores the capnp-serialization needed by the user of a `*this`
    * (which we happen to know is the `rpc::Message` schema) in SHM using the Flow-IPC SHM system.
    */
@@ -1011,8 +1163,10 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::Rpc_m
 
   m_daddy(daddy),
   m_msg(std::move(msg)),
+  m_shm_lnd_brw(m_daddy->m_shm_lnd_brw),
+  m_shm_arena(m_daddy->m_shm_arena),
   // Create a new MessageBuilder -- that allocates in SHM!  m_msg's internal MessageBuilder allocates in heap.
-  m_capnp_msg_in_shm(m_daddy->get_logger(), m_daddy->m_shm_arena,
+  m_capnp_msg_in_shm(m_daddy->get_logger(), m_shm_arena.get(),
                      seg0_word_sz * sizeof(::capnp::word)) // Our Flow-IPC guy can take a hint too (in bytes).
 {
   // Cool.
@@ -1065,7 +1219,7 @@ void Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_out_impl::
     capnp_msg_in_heap_root.setIsShortLivedMsg(false);
   }
 
-  const bool ok = m_capnp_msg_in_shm.lend(&capnp_msg_in_heap_root, m_daddy->m_shm_lnd_brw);
+  const bool ok = m_capnp_msg_in_shm.lend(&capnp_msg_in_heap_root, m_shm_lnd_brw.get());
   /* Now the message in SHM is safe from deallocation until both m_capnp_msg_in_shm is destroyed with *this,
    * *and* the receiver MessageReader (see Rpc_msg_in_impl) has had .borrow() called on it, and that MessageReader
    * is destroyed with its containing Rpc_msg_in_impl.  (Corollary: if the SHM-handle never reaches the receiver --
@@ -1194,6 +1348,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::Rpc_ms
   (kj::Own<Rpc_msg_in>&& msg, Session_vat_network* daddy) :
 
   m_msg(std::move(msg)),
+  m_shm_lnd_brw(daddy->m_shm_lnd_brw),
   // Create a new MessageReader -- that reads in SHM!  m_msg's internal MessageReader reads from heap.
   m_capnp_msg_in_shm(daddy->get_logger())
 {
@@ -1201,7 +1356,7 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Rpc_msg_in_impl::Rpc_ms
 
   Error_code err_code;
   m_capnp_msg_in_shm.borrow(m_msg->getBody().template getAs<schema::detail::CapnpRpcMsgTopSerialization>(),
-                            daddy->m_shm_lnd_brw, &err_code);
+                            m_shm_lnd_brw.get(), &err_code);
   KJ_REQUIRE(!err_code,
              "Was asked to accept a capnp-in-message by the RPC-system, but Capnp_message_reader::borrow() "
                "yielded failure which means the Flow-IPC session just went down (on account of opposing "
@@ -1289,15 +1444,15 @@ template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   (flow::log::Logger* logger_ptr, kj::AsyncIoContext* kj_io,
    bool srv_else_cli,
-   Shm_lender_borrower* shm_lnd_brw, Shm_arena* shm_arena,
+   Shm_lender_borrower_ptr&& shm_lnd_brw, Shm_arena_ptr&& shm_arena,
    Native_handle&& bidir_transport, unsigned int hndl_transport_limit_or_0) :
 
   flow::log::Log_context(logger_ptr, Log_component::S_RPC),
   m_streaming_flow_window_sz(S_STREAMING_FLOW_WINDOW_KI * 1024),
   m_kj_io(kj_io),
   m_srv_else_cli(srv_else_cli),
-  m_shm_lnd_brw(shm_lnd_brw),
-  m_shm_arena(shm_arena),
+  m_shm_lnd_brw(std::move(shm_lnd_brw)),
+  m_shm_arena(std::move(shm_arena)),
   m_msg_out_max_sz_words(0),
   m_accepted(false),
   m_disconnect_promise(nullptr)
@@ -1481,14 +1636,15 @@ Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
 template<typename Shm_lender_borrower_t, typename Shm_arena_t>
 Session_vat_network<Shm_lender_borrower_t, Shm_arena_t>::Session_vat_network
   (flow::log::Logger* logger_ptr, kj::AsyncIoContext* kj_io,
-   Shm_lender_borrower* shm_enabled_session,
+   Shm_lender_borrower_ptr&& shm_enabled_session,
    Native_handle&& bidir_transport, unsigned int hndl_transport_limit_or_0) :
 
   Session_vat_network(logger_ptr, kj_io,
                       Shm_lender_borrower::S_IS_SRV_ELSE_CLI,
-                      shm_enabled_session,
-                      shm_enabled_session ? shm_enabled_session->session_shm()
-                                          : nullptr, // Special mode.
+                      std::move(shm_enabled_session),
+                      // Aliasing ctor: point to the arena, but share the session's ownership (the arena belongs to it).
+                      shm_enabled_session ? Shm_arena_ptr{shm_enabled_session, shm_enabled_session->session_shm()}
+                                          : Shm_arena_ptr{}, // Special mode.
                       std::move(bidir_transport), hndl_transport_limit_or_0)
 {
   // Cool.

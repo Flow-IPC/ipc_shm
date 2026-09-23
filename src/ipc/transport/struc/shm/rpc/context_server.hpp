@@ -177,10 +177,15 @@ public:
    * a Server_context (exactly identical in capabilities to the opposing PEER-state Client_context).
    *
    * @warning `srv_app_ref` and `cli_app_master_set_ref` -- and the `Client_app`s to which the latter
-   *          (transitively) refers -- must remain alive throughout `*this` lifetime, as well as that of
-   *          any `Server_context` yielded by accept(): their *addresses* are stored and accessed at
-   *          various points later.  This is consistent with the intended global-registry lifecycle of
-   *          `Server_app`/`Client_app`/`App`; see the `struct` session::App doc header.
+   *          (transitively) refers -- must remain alive past this ctor: their *addresses*
+   *          are stored and accessed at various points later.  As usual, unless null, same for `*logger_ptr`.
+   *          **The required lifetime of these objects may exceed that of the constructed `*this`.**
+   *          Therefore:
+   * @see Please read Session_vat_network doc header section "Object lifetimes."  It explains how/why and more
+   *      importantly how long these objects must stay alive.  Promise: it's pretty easy.  (Hard part is to not
+   *      assume they just need to outlive `*this`.  The design of capnp-RPC/KJ is the reason for this.)
+   * @note Spoiler alert: An easy approach is to keep the `App` and `*logger_ptr` objects alive past
+   *       `*kj_io`.
    *
    * ### Context (white-boxy info) ###
    * Listening to incoming capnp-RPC connections means to first listen for Flow-IPC session-open attempts,
@@ -205,17 +210,18 @@ public:
    *
    * @param logger_ptr
    *        Logger to use for logging subsequently.  (You may use null to forego this completely.)
+   *        See lifetime warning above.
    * @param kj_io
    *        A KJ event loop context.
    * @param srv_app_ref
-   *        Properties of this server application.  The address is copied; the object is not copied.
-   *        Among other things this lists identification info about which opposing applications are allowed to
-   *        speak with us.
+   *        Properties of this server application.  Among other things this lists identification info about
+   *        which opposing applications are allowed to speak with us.
+   *        See lifetime warning above.
    * @param cli_app_master_set_ref
-   *        The set of all known `Client_app`s.  The address is copied; the object is not copied.
-   *        Technically, from our PoV, it need only list the `Client_app`s whose names are
-   *        in `srv_app_ref.m_allowed_client_apps`.  Refer to session::App doc header for best practices on
-   *        maintaining this master list.
+   *        The set of all known `Client_app`s.  Technically, from our PoV, it need only list the `Client_app`s
+   *        whose names are in `srv_app_ref.m_allowed_client_apps`.  Refer to session::App doc header for
+   *        best practices on maintaining this master list.
+   *        See lifetime warning above.
    */
   explicit Context_server(flow::log::Logger* logger_ptr, kj::AsyncIoContext* kj_io,
                           const session::Server_app& srv_app_ref,

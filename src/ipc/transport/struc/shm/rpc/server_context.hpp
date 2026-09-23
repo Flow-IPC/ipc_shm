@@ -21,7 +21,9 @@
 #include "ipc/transport/struc/shm/rpc/session_vat_network.hpp"
 #include "ipc/common.hpp"
 #include <flow/log/log.hpp>
+#include <boost/make_shared.hpp>
 #include <boost/move/unique_ptr.hpp>
+#include <boost/shared_ptr.hpp>
 
 namespace ipc::transport::struc::shm::rpc
 {
@@ -146,6 +148,11 @@ private:
   /// Attorney granting internal code (Context_server) access to the private ctor.
   friend struct Server_context_dtl;
 
+  // Types.
+
+  /// Basically `shared_ptr<Session_obj>`.
+  using Session_ptr = typename Vat_network::Shm_lender_borrower_ptr;
+
   // Constructors.
 
   /**
@@ -175,16 +182,28 @@ private:
   // Methods.
 
   /**
-   * Spiritually identical to Client_context::on_session_hosed().
+   * Spiritually identical to Client_context::on_session_hosed(), including in being `static` and capturing
+   * nothing of `*this` (see #m_session).
+   *
+   * @param logger_ptr
+   *        See ctor.
+   * @param session
+   *        `*m_session`, which is alive whenever its own handler fires.
    * @param err_code
-   *        See above.
+   *        From error handler.
    */
-  void on_session_hosed(const Error_code& err_code);
+  static void on_session_hosed(flow::log::Logger* logger_ptr, const Session_obj& session, const Error_code& err_code);
 
   // Data.
 
-  /// Session in PEER state.
-  Session_obj m_session;
+  /**
+   * Session in PEER state.
+   *
+   * Held via shared handle, as #m_network requires.  Corollary: `*m_session` may outlive `*this`.
+   * See Session_vat_network doc header, "Object lifetimes."  That is also why we warn about `Logger` and `App`
+   * lifetimes in our ctor doc header.
+   */
+  Session_ptr m_session;
 
   /// The established #Vat_network.
   Vat_network m_network;
@@ -198,29 +217,38 @@ Server_context<Server_session_t>::Server_context(flow::log::Logger* logger_ptr, 
                                                  bool enable_hndl_transport,
                                                  bool sans_shm_transport) :
   flow::log::Log_context(logger_ptr, Log_component::S_RPC),
-  m_session(std::move(session)),
-  m_network(get_logger(), kj_io, sans_shm_transport ? nullptr : &m_session, std::move(bidir_transport),
+  /* We take ownership of Session_obj... and immediately move-from it into a new Session_obj, that one
+   * wrapped in the shared_ptr handle as required by Session_vat_network m_session for its anonying lifetime
+   * reasons (see its class doc header). */
+  m_session(boost::make_shared<Session_obj>(std::move(session))),
+  m_network(get_logger(), kj_io,
+            sans_shm_transport ? Session_ptr{} : Session_ptr{m_session},
+            std::move(bidir_transport),
             enable_hndl_transport ? Session_vat_network_base::S_N_MAX_INCOMING_FDS : 0)
   // ^-- Can throw (unlikely).
 {
   FLOW_LOG_INFO("rpc::Server_ctx [" << *this << "]: Created in PEER state (presumably by Context_server); "
                 "zero-copy-enabled? = [" << (!sans_shm_transport) << "].");
 
-  m_session.init_handlers([this](const Error_code& err_code) { on_session_hosed(err_code); });
+  m_session->init_handlers([logger_ptr, session = m_session.get()](const Error_code& err_code)
+                             { on_session_hosed(logger_ptr, *session, err_code); });
 }
 
 template<typename Server_session_t>
 Server_context<Server_session_t>::~Server_context()
 {
   FLOW_LOG_INFO("rpc::Server_ctx [" << *this << "]: "
-                "Shutting down.  Session_vat_network shall shut down; then the ipc::session::Session.");
+                "Shutting down.  Session_vat_network shall shut down; then the ipc::session::Session.  "
+                "However: straggling capnp-RPC message(s) may keep the latter alive a bit longer than immediately "
+                "following Session_vat_network's destruction.");
 }
 
 template<typename Server_session_t>
-void Server_context<Server_session_t>::on_session_hosed(const Error_code& err_code)
+void Server_context<Server_session_t>::on_session_hosed(flow::log::Logger* logger_ptr, const Session_obj& session,
+                                                        const Error_code& err_code) // Static.
 {
-  FLOW_LOG_INFO("rpc::Server_ctx [" << *this << "]: "
-                "ipc::session::Session [" << m_session << "] session-hosed handler fired "
+  FLOW_LOG_SET_CONTEXT(logger_ptr, Log_component::S_RPC); // @todo Maybe use session.get_logger()?
+  FLOW_LOG_INFO("rpc::Server_ctx-created ipc::session::Session [" << session << "]: session-hosed handler fired "
                 "(code [" << err_code << "] [" << err_code.message() << "]).  This is likely normal, as the "
                 "opposing process decided to end session; the RPC-system will have detected same, and user "
                 "RPC session should be ended or ending imminently, at which point proper user code shall "
@@ -248,7 +276,7 @@ template<typename Server_session_t>
 typename Server_context<Server_session_t>::Session_obj*
   Server_context<Server_session_t>::session()
 {
-  return &m_session;
+  return m_session.get();
 }
 
 template<typename Server_session_t>

@@ -23,6 +23,8 @@
 #include "ipc/session/app.hpp"
 #include "ipc/common.hpp"
 #include <flow/log/log.hpp>
+#include <boost/make_shared.hpp>
+#include <boost/shared_ptr.hpp>
 #include <boost/thread/future.hpp>
 #include <optional>
 #include <algorithm>
@@ -190,18 +192,25 @@ public:
   /**
    * Constructs us without establishing the capnp-RPC session.  Use sync_connect() to establish it.
    *
-   * @warning `cli_app_ref` and `srv_app_ref` must remain alive throughout `*this` lifetime: their *addresses*
-   *          are stored and accessed at various points later.  This is consistent with the intended
-   *          global-registry lifecycle of `Client_app`/`Server_app`/`App`; see the `struct` session::App doc header.
+   * @warning `cli_app_ref` and `srv_app_ref` must remain alive past this ctor: their *addresses*
+   *          are stored and accessed at various points later.  As usual, unless null, same for `*logger_ptr`.
+   *          **The required lifetime of these objects may exceed that of the constructed `*this`.**
+   *          Therefore:
+   * @see Please read Session_vat_network doc header section "Object lifetimes."  It explains how/why and more
+   *      importantly how long these objects must stay alive.  Promise: it's pretty easy.  (Hard part is to not
+   *      assume they just need to outlive `*this`.  The design of capnp-RPC/KJ is the reason for this.)
+   * @note Spoiler alert: An easy approach is to keep `cli/srv_app_ref` and `*logger_ptr` objects alive past
+   *       `*kj_io`.
    *
    * @param logger_ptr
    *        Logger to use for logging subsequently.  (You may use null to forego this completely.)
+   *        See lifetime warning above.
    * @param kj_io
    *        A KJ event loop context.
    * @param cli_app_ref
-   *        Properties of this client application.  The address is copied; the object is not copied.
+   *        Properties of this client application.  See lifetime warning above.
    * @param srv_app_ref
-   *        Properties of the opposing server application.  The address is copied; the object is not copied.
+   *        Properties of the opposing server application.  See lifetime warning above.
    * @param enable_hndl_transport
    *        `true` means native handles (a/k/a capabilities in capnp-RPC parlance) can
    *        be RPC-transmitted (i.e., your interface impls and clients can use `.getFd()` and yield something
@@ -219,6 +228,9 @@ public:
    * #Session_obj, in that order.  You must destroy any related #Rpc_system before invoking this dtor.
    * If you have any directly-obtained (via `->construct<T>()` or `->borrow_object<T>()`) SHM-handles from
    * `*this`, you must have nullified them before invoking this dtor.
+   *
+   * (Internally the #Session_obj may outlive this dtor briefly -- until the KJ event loop has disposed of any
+   * message capnp-RPC has left in it -- but by then it is nobody's concern but its own.  See ctor doc header.)
    *
    * Informally we recommend, also, that once you disconnect your capnp-RPC conversation, or
    * the other side does so -- this can be detected via `vat_network()->on_disconnect()`-returned `kj::Promise` --
@@ -369,16 +381,30 @@ public:
   const Session_obj* session() const;
 
 private:
+  // Types.
+
+  /// Basically `shared_ptr<Session_obj>`.
+  using Session_ptr = typename Vat_network::Shm_lender_borrower_ptr;
+
   // Methods.
 
   /**
    * Session-hosed handler for #m_session.  This only logs as opposed to reporting to the user of `*this` for
-   * reasons explained inside (this is of some importance).
+   * reasons explained inside (this is of some importance).  May run after the relevant `*this` dies; hence
+   * the needed bits of info are to be captured and passed-in as args.
    *
+   * @param logger_ptr
+   *        See ctor.
+   * @param cli_app
+   *        See ctor.
+   * @param srv_app
+   *        See ctor.
    * @param err_code
-   *        Reason session was hosed as reported by ipc::session module.
+   *        From error handler.
    */
-  void on_session_hosed(const Error_code& err_code);
+  static void on_session_hosed(flow::log::Logger* logger_ptr,
+                               const session::Client_app& cli_app, const session::Server_app& srv_app,
+                               const Error_code& err_code);
 
   /**
    * Impl of sync_connect() and sync_connect_sans_shm_transport().
@@ -408,8 +434,14 @@ private:
   /// See ctor.
   const bool m_enable_hndl_transport;
 
-  /// Session in NULL state (until sync_connect() succeeds) or PEER state (subsequently).
-  Session_obj m_session;
+  /**
+   * Session in NULL state (until sync_connect() succeeds) or PEER state (subsequently).
+   *
+   * Held via shared handle, as #m_network requires.  Corollary: `*m_session` may outlive `*this`.
+   * See Session_vat_network doc header, "Object lifetimes."  That is also why we warn about `Logger` and `App`
+   * lifetimes in our ctor doc header.
+   */
+  Session_ptr m_session;
 
   /**
    * Null until sync_connect() succeeds; then the idle channel being kept up, having been used
@@ -446,30 +478,35 @@ Client_context<Client_session_t>::Client_context(flow::log::Logger* logger_ptr,
   m_cli_app_ref(cli_app_ref),
   m_srv_app_ref(srv_app_ref),
   m_enable_hndl_transport(enable_hndl_transport),
-  m_session(get_logger(), m_cli_app_ref, m_srv_app_ref,
-            [this](const Error_code& err_code) { on_session_hosed(err_code); })
+  m_session(boost::make_shared<Session_obj>(get_logger(), m_cli_app_ref, m_srv_app_ref,
+                                            [logger_ptr, &cli_app_ref, &srv_app_ref](const Error_code& err_code)
+                                              { on_session_hosed(logger_ptr, cli_app_ref, srv_app_ref, err_code); }))
 {
   FLOW_LOG_INFO("rpc::Client_ctx [" << *this << "]: "
-                "Created in NULL state (inactive).  Inactive ipc::session::Session [" << m_session << "] exists.");
+                "Created in NULL state (inactive).  Inactive ipc::session::Session [" << *m_session << "] exists.");
 }
 
 template<typename Client_session_t>
 Client_context<Client_session_t>::~Client_context()
 {
   FLOW_LOG_INFO("rpc::Client_ctx [" << *this << "]: "
-                "Shutting down.  Session_vat_network shall shut down; then the ipc::session::Session.");
+                "Shutting down.  Session_vat_network shall shut down; then the ipc::session::Session "
+                "(unless a straggling capnp-RPC message keeps the latter alive a bit longer).");
 }
 
 template<typename Client_session_t>
-void Client_context<Client_session_t>::on_session_hosed(const Error_code& err_code)
+void Client_context<Client_session_t>::on_session_hosed(flow::log::Logger* logger_ptr,
+                                                        const session::Client_app& cli_app,
+                                                        const session::Server_app& srv_app,
+                                                        const Error_code& err_code) // Static.
 {
-  FLOW_LOG_INFO("rpc::Client_ctx [" << *this << "]: "
-                "ipc::session::Session [" << m_session << "] session-hosed handler fired "
-                "(code [" << err_code << "] [" << err_code.message() << "]).  This is likely normal, as the "
-                "opposing process decided to end session; the RPC-system will have detected same, and user "
-                "RPC session should be ended or ending imminently, at which point proper user code shall "
-                "shut-down this Client_ctx which will shut down the Session_vat_network and lastly the "
-                "ipc::session::Session.");
+  FLOW_LOG_SET_CONTEXT(logger_ptr, Log_component::S_RPC);
+  FLOW_LOG_INFO("rpc::Client_ctx-created ipc::session::Session [" << cli_app.m_name << "->" << srv_app.m_name << "]: "
+                "session-hosed handler fired (code [" << err_code << "] [" << err_code.message() << "]).  "
+                "This is likely normal, as the opposing process decided to end session; the RPC-system will "
+                "have detected same, and user RPC session should be ended or ending imminently, at which point "
+                "proper user code shall shut-down this Client_ctx which will shut down the Session_vat_network and "
+                "lastly the ipc::session::Session.");
 
   /* Why do we merely log but in no way report this to `*this` user?
    * (After all with a vanilla Flow-IPC session we make a big deal of the session-hosed handler one must pass
@@ -553,7 +590,8 @@ bool Client_context<Client_session_t>::sync_connect_impl
 #ifndef NDEBUG
     const bool ok =
 #endif
-    m_session.sync_connect(m_session.mdt_builder(), &actual_init_channels_by_cli, nullptr, init_channels_by_srv_req);
+    m_session->sync_connect(m_session->mdt_builder(), &actual_init_channels_by_cli, nullptr,
+                            init_channels_by_srv_req);
     assert(ok && "We had a NULL-state Client_session and tried .sync_connect(); why would it have reported otherwise?");
 
     /* .sync_connect() would have thrown on error (as advertised) (probably other guy isn't up; m_network remained
@@ -695,13 +733,15 @@ bool Client_context<Client_session_t>::sync_connect_impl
     if (m_enable_hndl_transport)
     {
       // Let it use the sensible default for last arg.
-      m_network.emplace(get_logger(), m_kj_io, sans_shm_transport ? nullptr : &m_session,
+      m_network.emplace(get_logger(), m_kj_io,
+                        sans_shm_transport ? Session_ptr{} : Session_ptr{m_session},
                         std::move(local_hndl));
     }
     else
     {
       // As requested disable handle-transmission (last arg).
-      m_network.emplace(get_logger(), m_kj_io, sans_shm_transport ? nullptr : &m_session,
+      m_network.emplace(get_logger(), m_kj_io,
+                        sans_shm_transport ? Session_ptr{} : Session_ptr{m_session},
                         std::move(local_hndl), 0);
     }
     assert(local_hndl.null() && "Session_vat_network ctor promises to consume the transport handle immediately.");
@@ -721,7 +761,7 @@ bool Client_context<Client_session_t>::sync_connect_impl
     catch (...) { msg = "(unknown exception type)"; }
 
     FLOW_LOG_WARNING("rpc::Client_ctx [" << *this << "]: A step of capnp-RPC connect (the ipc::session::Session "
-                     "[" << m_session << "] connect itself; socket-pair creation; socket-handle transmission; "
+                     "[" << *m_session << "] connect itself; socket-pair creation; socket-handle transmission; "
                      "Session_vat_network ctor) threw exception [" << msg << "] which we shall re-throw; "
                      "getting `*this` and out-args back to pristine state first.");
     /* Close whatever socket-pair handles remain in our custody (each of these no-ops on null handle;
@@ -745,8 +785,11 @@ bool Client_context<Client_session_t>::sync_connect_impl
 
     /* Whether Session connect failed (leaving it in NULL state) or succeeded (PEER state) before the throw:
      * replace it with a fresh NULL-state one; a subsequent retry starts from scratch. */
-    m_session = Session_obj{get_logger(), m_cli_app_ref, m_srv_app_ref,
-                            [this](const Error_code& err_code) { on_session_hosed(err_code); }};
+    m_session
+      = boost::make_shared<Session_obj>(get_logger(), m_cli_app_ref, m_srv_app_ref,
+                                        [logger_ptr = get_logger(), &cli_app = m_cli_app_ref, &srv_app = m_srv_app_ref]
+                                          (const Error_code& err_code)
+                                            { on_session_hosed(logger_ptr, cli_app, srv_app, err_code); });
     assert((!m_network) && "If Session_vat_network ctor (last step) threw -- m_network should still be null!  Bug?");
 
     throw;
@@ -774,7 +817,7 @@ template<typename Client_session_t>
 typename Client_context<Client_session_t>::Session_obj*
   Client_context<Client_session_t>::session()
 {
-  return m_network ? &m_session : nullptr;
+  return m_network ? m_session.get() : nullptr;
 }
 
 template<typename Client_session_t>

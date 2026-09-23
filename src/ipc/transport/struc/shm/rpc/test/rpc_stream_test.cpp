@@ -93,7 +93,7 @@ static_assert(std::is_same_v<Apps::Client_session_t, Client_session_t>
 // Logger for the objects under test: null by default; flip to get their logs (at the level test_main.cpp sets).
 flow::log::Logger* obj_logger()
 {
-#if 0 // 1 XXXtemp for debug
+#if 1
   return nullptr;
 #else
   static ipc::test::Test_logger s_logger{flow::log::Sev::S_TRACE}; // Default DATA is a bit extreme with the dumps.
@@ -415,11 +415,6 @@ TEST(Rpc_stream_test, client_stream_window)
  * gate; with a window >> 2 S both send()s resolve at once, so pull() returns while still gated. */
 TEST(Rpc_stream_test, server_window_default)
 {
-  /* XXX Temporarily skipped: reproduces a real bug (SIGSEGV at teardown: a capnp-RPC call context, owned by the
-   * KJ event loop rather than the RpcSystem, frees its in-SHM message after the session's SHM arena is gone).
-   * Re-enable once the Session_vat_network shared-session-handle fix is in. */
-  GTEST_SKIP() << "Skipped pending the Session_vat_network message-outlives-session fix.";
-
   const auto run = [](size_t srv_window_ki, bool expect_stall)
   {
     constexpr size_t N_CHUNKS = 2;

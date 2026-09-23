@@ -228,13 +228,16 @@ public:
                  <session::Server_session_mv
                     <Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>;
 
+  /// Short-hand for base class member alias Session_mv::Arena.  Its doc header contains useful context and tips.
+  using Arena = typename Base::Arena;
+
   /**
    * Server_session::Vat_network and `Client_session::Vat_network` are reasonable concrete types
    * of template transport::struc::shm::rpc::Session_vat_network for an ipc::session user to use on opposing
    * sides of a session; use the mainstream-form ctor to straightforwardly construct your zero-copy-enabled
    * `Vat_network` (from a `*this`) for blazing-fast capnp-RPC.
    */
-  using Vat_network = typename Base::Vat_network;
+  using Vat_network = transport::struc::shm::rpc::Session_vat_network<Server_session, Arena>;
 
   /// You may disregard.
   using Async_io_obj = transport::Null_peer;
