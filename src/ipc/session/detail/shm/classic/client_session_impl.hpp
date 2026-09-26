@@ -189,7 +189,7 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
    * them; so we can simply perform the entire vanilla Base::Base::async_connect(), and if that went fine then
    * open the arenas.
    *
-   * The only wrinkle is, what (unlikely though it is) the opening fails.  *(Base*)this is already in PEER
+   * The only wrinkle is: what if (unlikely though it is) the opening fails?  *(Base*)this is already in PEER
    * state by then.  Well, cancel_peer_state_to_null() exists for that purpose.  A bit cheesy?  One could say that...
    * but it's not that bad.
    *
@@ -254,16 +254,20 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
 
     if (err_code)
     {
-      // Get back to NULL state all around.  Note: do *not* ever clean underlying shared resources (server's job!).
-      assert(!m_app_shm);
+      /* Get back to NULL state all around.  Note: do *not* ever clean underlying shared resources (server's job!).
+       * Careful: a failed open-only Pool_arena ctor still yields a (non-null) object in a failed state; so the
+       * local session_shm and/or m_app_shm may be non-null here.  Drop them all, so that the next connect attempt
+       * starts from scratch (m_app_shm must be null; and we never init_shm_arenas() on failure). */
+      m_app_shm.reset();
+      // session_shm (local) goes away on its own.
       Base::Base::cancel_peer_state_to_null();
     }
-    // else { Well... great!  Stay in PEER state. }
-    Base::init_shm_arenas(std::move(session_shm), m_app_shm.get()); // Might be saving nulls (if err_code truthy).
-
-    if (!err_code)
+    else
     {
-      // Still good!  Finalize out-args.
+      // Well... great!  Stay in PEER state.
+      Base::init_shm_arenas(std::move(session_shm), m_app_shm.get());
+
+      // Finalize out-args.
       if (init_channels_by_cli_req_pre_sized)
       {
         *init_channels_by_cli_req_pre_sized = std::move(*temp_init_channels_by_cli_req_pre_sized);
@@ -276,7 +280,7 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
       {
         *init_channels_by_srv_req = std::move(*temp_init_channels_by_srv_req);
       }
-    } // if (!err_code)
+    } // else if (!err_code)
 
     on_done_func(err_code); // err_code could be truthy.
   }); // return Base::Base::async_connect()

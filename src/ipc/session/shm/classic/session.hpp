@@ -179,7 +179,7 @@ public:
    * Long story short (though reading the *server* section just below will provide context/background if needed):
    *   - `this->app_shm()` always returns `&A`, where `A` is an #Arena.  No other object returns the same
    *     `&A`.
-   *   -`A` can be accessed until `*this` session is destroyed.  It is impromper (behavior undefined), for code
+   *   - `A` can be accessed until `*this` session is destroyed.  It is improper (behavior undefined), for code
    *     in this process, to access any objects residing in SHM areas `A` past that point.
    *
    * To expand somewhat: A `Client_session` dies for one of two reasons if used properly.  One, locally triggered:
@@ -214,7 +214,7 @@ public:
    * but we digress; basically its lifetime extends to the end of the "parent" server's).
    *
    * It is not quite as simple as that, though.  The actual RAM is given-back to the OS only once (1) the
-   * aforementioned *removal* has occured; *and* (2) every #Arena in every process that is open w/r/t that
+   * aforementioned *removal* has occurred; *and* (2) every #Arena in every process that is open w/r/t that
    * same pool has been destroyed (even if its dtor does not run due to abrupt exit, OS will clean it up;
    * but again we digress; just think of it as destroyed via `Arena::~Arena()`).  That is: Each #Arena
    * is a pool *handle*, and they are tracked by the OS in ref-count fashion cross-process; once they all go away,
@@ -232,8 +232,8 @@ public:
    *     - Thus `Y.app_shm()` (where `Y` is any shm::classic::Server_session coming from the same `X`,
    *       and with the same Server_session_mv::client_app()) also always returns `&A`,
    *       and the `A` is that very same #Arena again.
-   *   -`A` can be accessed until the server object `X` (whose `X.async_accept()` yielded the contents of `*this`)
-   *     is destroyed.  It is impromper (behavior undefined) for code in this process to access any objects
+   *   - `A` can be accessed until the server object `X` (whose `X.async_accept()` yielded the contents of `*this`)
+   *     is destroyed.  It is improper (behavior undefined) for code in this process to access any objects
    *     residing in SHM areas `A` past that point.
    *     - However, crucially, it is both proper and intended that `A` (along with objects residing therein) is used
    *       across 1+ `shm::classic::Server_session`s sharing the same Client_app, all the way up to the death
@@ -261,7 +261,7 @@ public:
    * It is the user's responsibility to transmit the returned blob, such as via a transport::Channel,
    * to the owning process.  Failing to do so will leak the object until arena cleanup.  (Arena cleanup time
    * depends on the source #Arena.  If it came from session_shm(), arena cleanup occurs at Session destruction.
-   * If from app_shm(), arena cleanup occurs at Server_session destruction.  If a destructor does not run, due to
+   * If from app_shm(), arena cleanup occurs at Session_server destruction.  If a destructor does not run, due to
    * crash/etc., then the leaked ipc::session-managed `Arena`s' pools are cleaned the next time a Session_server
    * is constructed.)
    *
@@ -288,7 +288,7 @@ public:
   Blob lend_object(const typename Arena::template Handle<T>& handle);
 
   /**
-   * Completes the cross-process operation begun by oppsing Session_mv::lend_object() that returned `serialization`;
+   * Completes the cross-process operation begun by opposing Session_mv::lend_object() that returned `serialization`;
    * to be invoked in the intended new owner process which is operating `*this`.
    *
    * @tparam T

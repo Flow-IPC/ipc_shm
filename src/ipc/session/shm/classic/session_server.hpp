@@ -48,7 +48,7 @@ namespace ipc::session::shm::classic
  *
  * @internal
  * ### Implementation ###
- * See similar section of session::Session_server.  It explains why we sub-class Session_server_impl and even how
+ * See similar section of session::Session_server.  It explains why we sub-class Session_server_impl and even
  * how that's used for this SHM-classic scenario.  To reiterate:
  *
  * We use 2 of 2 available customization points of `private` super-class Session_server_impl.  We:
@@ -164,7 +164,7 @@ public:
    *
    * ### What if this dtor never runs? ###
    * In any program that exits without aborting abruptly, it *will* run -- either proactively during user program
-   * de-init code or implicity when it exits.
+   * de-init code or implicitly when it exits.
    *
    * It however may not run due to abrupt termination (a crash).  In that case the `app_shm()` pools will indeed
    * leak, in that this dtor won't execute, so the `remove_persistent()`s will not occur in that fashion.
@@ -175,7 +175,7 @@ public:
    * ### What about the per-session pools? ###
    * The above talks only of the app_shm()-returned pools; what about shm::classic::Session_impl::session_shm()?
    * Shouldn't we clean it up here?  Answer: Well, we could, but since it's a per-session thing,
-   * each shm::classic::Session_server_impl takes care of its own `session_shm()`.
+   * each shm::classic::Server_session_impl takes care of its own `session_shm()`.
    */
   ~Session_server();
 
@@ -523,7 +523,7 @@ CLASS_CLSC_SESSION_SRV::Session_server(flow::log::Logger* logger_ptr, const Serv
    * definition old.  Note that as of this writing there is at most *one* active process (instance) of a
    * given Server_app.
    *
-   * A note on stats: A stat surface for this cleanup point has been considered and deliberately omitted;
+   * A note on stats: Stats support for this cleanup point has been considered and deliberately omitted;
    * see similar note in session::Session_server_impl ctor (and a longer discussion in
    * shm::arena_lend::jemalloc::Session_server::cleanup()). */
   util::remove_each_persistent_with_name_prefix<Arena>
@@ -552,7 +552,14 @@ CLASS_CLSC_SESSION_SRV::Session_server(flow::log::Logger* logger_ptr, const Serv
 } // Session_server::Session_server()
 
 TEMPLATE_CLSC_SESSION_SRV
-CLASS_CLSC_SESSION_SRV::~Session_server() = default; // Declared just to document it.  Forward to base.
+CLASS_CLSC_SESSION_SRV::~Session_server()
+{
+  /* Stop all async_accept() activity before our members (m_app_shm_mutex, m_app_shm_by_name, et al) are
+   * destroyed: in-flight log-ins reach them via init_app_shm_as_needed(), app_shm(), and pool_size_limit_mi().
+   * See Session_server_impl::dtor_stop_accepting().  The rest (including the app_shm() pool removal promised
+   * above) happens in the base dtor. */
+  Impl::dtor_stop_accepting();
+}
 
 TEMPLATE_CLSC_SESSION_SRV
 void CLASS_CLSC_SESSION_SRV::pool_size_limit_mi(size_t limit_mi)

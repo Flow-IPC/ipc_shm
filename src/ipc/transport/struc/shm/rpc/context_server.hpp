@@ -511,7 +511,7 @@ Context_server<Session_server_t>::Context_server(flow::log::Logger* logger_ptr, 
   m_streaming_flow_window_default_ki(0),
   m_kj_io(kj_io),
   m_session_server(get_logger(), srv_app_ref, cli_app_master_set_ref,
-                   // Let it throw on catastrophic error!  E.g., writing CNS (PID) file; dealing with IPC-mutex.
+                   // Let it throw on catastrophic error!  E.g., writing CNS (PID file); dealing with IPC-mutex.
                    nullptr),
   m_kj_tasks(*this)
 {

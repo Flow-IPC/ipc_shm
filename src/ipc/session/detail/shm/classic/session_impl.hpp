@@ -176,7 +176,7 @@ protected:
    * values replacing null values.
    *
    * @param session_shm_not_null
-   *        Value for session_shm().  The arg is nullfied by the method (via move()).
+   *        Value for session_shm().  The arg is nullified by the method (via move()).
    * @param app_shm_not_null
    *        Value for app_shm().  The pointee must stay alive until `*this` is destroyed.
    */
@@ -355,8 +355,8 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
   const auto real_serialization_sz = real_serialization.size() - SCOPE_ID_SZ;
   real_serialization.start_past_prefix_inc(real_serialization_sz);
 
-  /* real_serialization.data() is aligned fine if only due to being a (deep) copy.  However we don't know
-   * know for sure that real_serialization_sz implies alignment of scope_id immediately following.  Hence
+  /* real_serialization.data() is aligned fine if only due to being a (deep) copy.  However we do not know
+   * for sure that real_serialization_sz implies alignment of scope_id immediately following.  Hence
    * memcpy() -- do not assign, if only for that reason. */
   scope_id_t scope_id;
   memcpy(&scope_id, real_serialization.const_data(), SCOPE_ID_SZ);
@@ -398,7 +398,7 @@ typename CLASS_CLSC_SESSION_IMPL::Structured_msg_builder_config
                                           .stats_mutable_default().m_snd,
                                         &Outer_serializer_global_stats<Arena>::get()
                                           .stats_mutable_default().m_snd };
-} // Session_impl_util::shm_builder_config()
+} // Session_impl::shm_builder_config()
 
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Structured_msg_reader_config
@@ -410,7 +410,7 @@ typename CLASS_CLSC_SESSION_IMPL::Structured_msg_reader_config
                                        // Default rcv-stats target: per-Arena SHM-msg-outer global.
                                        &Outer_serializer_global_stats<Arena>::get()
                                          .stats_mutable_default().m_rcv };
-} // Session_impl_util::shm_reader_config()
+} // Session_impl::shm_reader_config()
 
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Structured_msg_builder_config
