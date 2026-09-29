@@ -147,6 +147,8 @@ public:
    *
    * @param srv
    *        See Server_session_mv counterpart.
+   * @param mq_msg_size_limit
+   *        See Server_session_mv counterpart.
    * @param init_channels_by_srv_req
    *        See Server_session_mv counterpart.
    * @param mdt_from_cli_or_null
@@ -169,7 +171,7 @@ public:
   template<typename Session_server_impl_t,
            typename Task_err, typename Cli_app_lookup_func, typename Cli_namespace_func, typename Pre_rsp_setup_func,
            typename N_init_channels_by_srv_req_func, typename Mdt_load_func>
-  void async_accept_log_in(Session_server_impl_t* srv,
+  void async_accept_log_in(Session_server_impl_t* srv, size_t mq_msg_size_limit,
                            typename Base::Base::Channels* init_channels_by_srv_req,
                            typename Base::Base::Mdt_reader_ptr* mdt_from_cli_or_null,
                            typename Base::Base::Channels* init_channels_by_cli_req,
@@ -204,7 +206,7 @@ template<typename Session_server_impl_t,
          typename Task_err, typename Cli_app_lookup_func, typename Cli_namespace_func, typename Pre_rsp_setup_func,
          typename N_init_channels_by_srv_req_func, typename Mdt_load_func>
 void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
-       (Session_server_impl_t* srv,
+       (Session_server_impl_t* srv, size_t mq_msg_size_limit,
         typename Base::Base::Channels* init_channels_by_srv_req,
         typename Base::Base::Mdt_reader_ptr* mdt_from_cli_or_null,
         typename Base::Base::Channels* init_channels_by_cli_req,
@@ -342,7 +344,7 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
    * m_session_shm doc header we should aggressively clean up our SHM-pool handles.  So we just add a bit of
    * post-processing in that case. */
 
-  Base::Base::async_accept_log_in(srv,
+  Base::Base::async_accept_log_in(srv, mq_msg_size_limit,
                                   init_channels_by_srv_req, mdt_from_cli_or_null, init_channels_by_cli_req,
                                   std::move(cli_app_lookup_func),
                                   std::move(cli_namespace_func),

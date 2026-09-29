@@ -226,7 +226,7 @@ public:
    * mere existence of extant #Arena objects in any process.  Given that, here are more facts:
    *   - `this->app_shm()` always returns `&A`, where `A` is an #Arena.
    *     In fact it returns `X.app_shm(C)`, where `C` is the Client_app pertaining to `*this`, and
-   *     `X` is the shm::classic::Server_session whose shm::classic::Session_server::async_accept() loaded `*this`.
+   *     `X` is the shm::classic::Session_server whose async_accept() loaded `*this`.
    *     shm::classic::Session_server::app_shm() doc header states that it always returns the same non-null value
    *     until `X`'s destruction.
    *     - Thus `Y.app_shm()` (where `Y` is any shm::classic::Server_session coming from the same `X`,
@@ -273,7 +273,7 @@ public:
    * E.g., shm::arena_lend::jemalloc::Server_session::lend_object() does not, and cannot (as it does not exist), call
    * any `Arena::lend_object()`.
    *
-   * However, if your code specifically counts on `*this` being a shm::classic::Server_session, then it is not wrong
+   * However, if your code specifically counts on `*this` being a shm::classic::Session_mv, then it is not wrong
    * to rely on this knowledge.
    *
    * @tparam T

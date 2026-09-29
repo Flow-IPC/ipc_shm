@@ -306,10 +306,10 @@ public:
 
   /**
    * Returns pointer to the per-`app` SHM-arena, whose lifetime extends until `*this` is destroyed;
-   * or null if the given Client_app has not yet opened at least 1 shm::classic::Server_session via
-   * async_accept().  Alternatively you may use shm::classic::Session_mv::app_shm() off any session object
-   * filled-out by `*this` async_accept(), as long as its Server_session_mv::client_app() equals
-   * `app` (by App::m_name equality).
+   * or null if that arena has not yet been successfully created (which is attempted during the log-in of the
+   * first client of `app` to reach `*this` via async_accept()).  Alternatively you may use
+   * shm::classic::Session_mv::app_shm() off any session object filled-out by `*this` async_accept(), as long as its
+   * Server_session_mv::client_app() equals `app` (by App::m_name equality).
    *
    * If non-null is returned, then the same pointer value shall be returned for all subsequent calls
    * with the same (by App::m_name equality) `app`.  The non-null pointers returned for any 2 calls, where `app`
@@ -319,17 +319,17 @@ public:
    * `lend_object()`, and `borrow_object()`.
    *
    * ### Perf ###
-   * Given the choice between Server_session_mv::app_shm() and the present method, the latter is somewhat
+   * Given the choice between Session_mv::app_shm() and the present method, the latter is somewhat
    * slower; internally it involves a mutex-protected map lookup, while the former simply returns a cached
    * pointer as of this writing.
    *
-   * Generally it is also quite fast for the user to save any non-null value returned by either `app_shm()`;
+   * Generally it is also fine, and fastest, for the user to save any non-null value returned by either `app_shm()`;
    * the pointer returned shall always be the same after all.
    *
    * @internal
    * ### Thread safety ###
    * For internal use, namely by shm::classic::Server_session_impl::async_accept_log_in() at least,
-   * it is guaranteed the app_shm() may be called on the same `*this` concurrently to itself
+   * it is guaranteed that app_shm() may be called on the same `*this` concurrently to itself
    * and init_app_shm_as_needed().  Formally speaking this isn't publicly documented, as I (ygoldfel) didn't want
    * to get users into any bad habit, but internally it does have this property -- as it is required.
    * @endinternal
@@ -352,11 +352,12 @@ public:
    * In that case the present method yields undefined behavior (assertion may trip).
    *
    * ### Perf ###
-   * Given the choice between Server_session_mv::app_shm_builder_config() and the present method, the latter is somewhat
+   * Given the choice between Session_mv::app_shm_builder_config() and the present method, the latter is somewhat
    * slower (reason: same as listed in app_shm() doc header).
    *
-   * Generally it is also quite fast for the user to save any value returned by either `app_shm_builder_config()`,
-   * as an equal-by-value `Config` object shall be returned for the same (by App::m_name equality) `app`.
+   * Generally it is also fine, and fastest, for the user to save any value returned by either
+   * `app_shm_builder_config()`, as an equal-by-value `Config` object shall be returned for the same
+   * (by App::m_name equality) `app`.
    *
    * @param app
    *        See app_shm().
@@ -440,10 +441,10 @@ private:
   /// See pool_size_limit_mi().
   size_t m_pool_size_limit_mi;
 
-  /// Identical to Session_server::m_srv_app_ref.  Used in init_app_shm_as_needed() name calc.
+  /// Identical to Session_server_impl::m_srv_app_ref.  Used in init_app_shm_as_needed() name calc.
   const Server_app& m_srv_app_ref;
 
-  /// Identical Session_base::m_srv_namespace.  Used in init_app_shm_as_needed() name calc.
+  /// Identical to Session_base::m_srv_namespace.  Used in init_app_shm_as_needed() name calc.
   Shared_name m_srv_namespace;
 
   /// Protects #m_app_shm_by_name and #m_shm_pool_names.
@@ -451,7 +452,7 @@ private:
 
   /**
    * The per-app-scope SHM arenas by App::m_name.  If it's not in the map, it has not been needed yet.
-   * If it is but is null, it has but error caused it to not be set-up successfully.
+   * If it is but is null, it has been needed, but an error prevented its successful setup.
    */
   boost::unordered_map<std::string, boost::movelib::unique_ptr<Arena>> m_app_shm_by_name;
 
