@@ -164,11 +164,6 @@ public:
   using flow::log::Log_context::get_log_component;
 
 protected:
-  // Types.
-
-  /// Short-hand for, basically, #Arena that may not have been opened yet (and is therefore null).
-  using Arena_ptr = boost::movelib::unique_ptr<Arena>;
-
   // Methods.
 
   /**
@@ -176,16 +171,16 @@ protected:
    * values replacing null values.
    *
    * @param session_shm_not_null
-   *        Value for session_shm().  The arg is nullified by the method (via move()).
+   *        Handle for session_shm().  The arg is nullified by the method (via `move()`).
    * @param app_shm_not_null
-   *        Value for app_shm().  The pointee must stay alive until `*this` is destroyed.
+   *        Handle for app_shm() (probably a copy if `*this` is really a Server_session_impl: the per-app arena is
+   *        shared among `Server_session_impl`s).  The arg is nullified by the method (via `move()`).
    */
-  void init_shm_arenas(Arena_ptr&& session_shm_not_null, Arena* app_shm_not_null);
+  void init_shm_arenas(Arena_ptr&& session_shm_not_null, Arena_ptr&& app_shm_not_null);
 
   /**
    * Undoes init_shm_arenas().  Intended as of this writing as a one-time resource clean in case of subsequent failure.
-   * @warning Since `*this` class (not speaking of sub-class) does not own app_shm()'s pointee, that pointee
-   *          is *not* destroyed.  That is the caller's responsibility.
+   * (Only our handle to the app_shm() arena is dropped; the arena lives on, if and while others hold it.)
    */
   void reset_shm_arenas();
 
@@ -234,11 +229,11 @@ private:
 
   /**
    * See app_shm().  This becomes non-null, together with #m_session_shm, via assignment at most once via
-   * init_shm_arenas().  However, unlike #m_session_shm, this is a raw pointer: this allows for
-   * one #Arena to be shared among multiple `*this`s (which is essential on the server side; i.e.,
-   * for shm::classic::Server_session_impl).
+   * init_shm_arenas().  Unlike #m_session_shm, the pointee is possible shared with other holders (on the server
+   * side: the `Session_server` and its other `Server_session`s of the same Client_app).  If `*this` is really
+   * a Client_session_impl, then it is not shared.
    */
-  Arena* m_app_shm = {};
+  Arena_ptr m_app_shm;
 }; // class Session_impl
 
 // Free functions: in *_fwd.hpp.
@@ -253,20 +248,20 @@ private:
   Session_impl<Session_impl_t>
 
 TEMPLATE_CLSC_SESSION_IMPL
-void CLASS_CLSC_SESSION_IMPL::init_shm_arenas(Arena_ptr&& session_shm_not_null, Arena* app_shm_not_null)
+void CLASS_CLSC_SESSION_IMPL::init_shm_arenas(Arena_ptr&& session_shm_not_null, Arena_ptr&& app_shm_not_null)
 {
   assert(!m_session_shm);
   assert(!m_app_shm);
 
   m_session_shm = std::move(session_shm_not_null);
-  m_app_shm = app_shm_not_null;
+  m_app_shm = std::move(app_shm_not_null);
 }
 
 TEMPLATE_CLSC_SESSION_IMPL
 void CLASS_CLSC_SESSION_IMPL::reset_shm_arenas()
 {
   m_session_shm.reset();
-  m_app_shm = nullptr; // As advertised we do not clean this (it may be shared).
+  m_app_shm.reset(); // Just our handle; the arena itself lives on while others hold it.
 }
 
 TEMPLATE_CLSC_SESSION_IMPL
@@ -278,7 +273,7 @@ typename CLASS_CLSC_SESSION_IMPL::Arena* CLASS_CLSC_SESSION_IMPL::session_shm()
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Arena* CLASS_CLSC_SESSION_IMPL::app_shm()
 {
-  return m_app_shm;
+  return m_app_shm.get();
 }
 
 TEMPLATE_CLSC_SESSION_IMPL

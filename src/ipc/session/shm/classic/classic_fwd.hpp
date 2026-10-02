@@ -53,12 +53,12 @@ class Session_server;
  * The only difference is shm::classic::Server_session::app_shm() and `shm::classic::Client_session::app_shm()`
  * (actually Session_mv::app_shm() = both) differ in terms of how one views the lifetime of the
  * underlying SHM areas.  This is reflected in the latter's doc header.
- * Essentially, though, the `Arena*` returned by the former can be used beyond
- * the returning `*this` being destroyed, as long as its parent shm::classic::Session_server is alive (which
- * is typical).  In contrast that is not true of that returned by `shm::classic::Client_session::app_shm()`; but
- * since the destruction of a #Client_session implies either the process is itself going down, or the
- * opposing server process (and thus shm::classic::Session_server) is going down/has gone down, this should not
- * be relevant, as those objects should never be accessed again anyway.
+ * Essentially, though, the `Arena*` returned by the former can be used beyond the returning `*this` being destroyed,
+ * as long as its parent shm::classic::Session_server -- or another shm::classic::Server_session from it, with the
+ * same Client_app -- is alive (which is typical).  In contrast that is not true of that returned by
+ * `shm::classic::Client_session::app_shm()`; but since the destruction of a #Client_session implies either the
+ * process is itself going down, or the opposing server process (and thus shm::classic::Session_server) is going
+ * down/has gone down, this should not be relevant, as those objects should never be accessed again anyway.
  *
  * @internal
  * ### Implementation ###

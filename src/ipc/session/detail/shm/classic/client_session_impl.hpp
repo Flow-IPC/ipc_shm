@@ -20,7 +20,6 @@
 
 #include "ipc/session/detail/shm/classic/session_impl.hpp"
 #include "ipc/session/detail/client_session_impl.hpp"
-#include <boost/move/make_unique.hpp>
 
 namespace ipc::session::shm::classic
 {
@@ -125,14 +124,6 @@ private:
                      typename Base::Base::Base::Mdt_reader_ptr* mdt_from_srv_or_null,
                      typename Base::Base::Base::Channels* init_channels_by_srv_req,
                      Task_err&& on_done_func);
-
-  // Data.
-
-  /**
-   * Pointee of this is the pointee of Base::app_shm(); null until successful async_connect(); non-null and
-   * immutable subsequently.
-   */
-  typename Base::Arena_ptr m_app_shm;
 }; // class Client_session_impl
 
 // Free functions: in *_fwd.hpp.
@@ -178,7 +169,6 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
         typename Base::Base::Base::Channels* init_channels_by_srv_req,
         Task_err&& on_done_func)
 {
-  using boost::movelib::make_unique;
   using boost::make_shared;
   using boost::shared_ptr;
   using Channels = typename Base::Base::Base::Channels;
@@ -231,13 +221,14 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
     const auto cli_app_name = Shared_name::ct(Base::Base::Base::cli_app_ptr()->m_name);
     const auto& srv_namespace = Base::Base::Base::srv_namespace();
 
-    decltype(m_app_shm) session_shm;
+    Arena_ptr session_shm;
+    Arena_ptr app_shm;
     auto shm_pool_name = build_conventional_shared_name(Shared_name::S_RESOURCE_TYPE_ID_SHM,
                                                         srv_app_name, srv_namespace, cli_app_name,
                                                         Base::Base::Base::cli_namespace())
                          / SHM_SUBTYPE_PREFIX
                          / Shared_name::S_1ST_OR_ONLY;
-    session_shm = make_unique<typename Base::Arena>
+    session_shm = make_shared<typename Base::Arena>
                     (get_logger(), shm_pool_name, util::OPEN_ONLY, false, &err_code);
 
     if (!err_code)
@@ -247,25 +238,22 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
                       / SHM_SUBTYPE_PREFIX
                       / Shared_name::S_1ST_OR_ONLY;
 
-      assert(!m_app_shm);
-      m_app_shm = make_unique<typename Base::Arena>
-                    (get_logger(), shm_pool_name, util::OPEN_ONLY, false, &err_code);
+      app_shm = make_shared<typename Base::Arena>
+                  (get_logger(), shm_pool_name, util::OPEN_ONLY, false, &err_code);
     } // if (!err_code) (but may have become truthy inside)
 
     if (err_code)
     {
       /* Get back to NULL state all around.  Note: do *not* ever clean underlying shared resources (server's job!).
        * Careful: a failed open-only Pool_arena ctor still yields a (non-null) object in a failed state; so the
-       * local session_shm and/or m_app_shm may be non-null here.  Drop them all, so that the next connect attempt
-       * starts from scratch (m_app_shm must be null; and we never init_shm_arenas() on failure). */
-      m_app_shm.reset();
-      // session_shm (local) goes away on its own.
+       * locals session_shm and/or app_shm may be non-null here.  They go away on their own; and we never
+       * init_shm_arenas() on failure, so the next connect attempt starts from scratch. */
       Base::Base::cancel_peer_state_to_null();
     }
     else
     {
       // Well... great!  Stay in PEER state.
-      Base::init_shm_arenas(std::move(session_shm), m_app_shm.get());
+      Base::init_shm_arenas(std::move(session_shm), std::move(app_shm));
 
       // Finalize out-args.
       if (init_channels_by_cli_req_pre_sized)

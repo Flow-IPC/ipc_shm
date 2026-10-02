@@ -150,19 +150,20 @@ namespace ipc::session::shm::classic
  * as well, because why not?  However, for a given distinct Client_app, pool has to be *created* only the first time
  * Session_server encounters an instance of the application described by that Client_app; after that it's already
  * created, so no creation is necessary.  Either way, keep the handle around to return in app_shm().
- * However, by definition, a given per-app arena is to stay alive until the entire server (shm::classic::Session_server)
- * is destroyed; resources (including transport::struc::Msg_out) residing in an app_shm()-returned
- * arena stay around potentially over 2+ sessions and can be shared via any of them (as long as they apply to
- * the same Client_app).  Because of this more-than-session lifetime, the app_shm()-returned arenas are actually tracked
- * in the parent shm::classic::Session_server; it uses one of the Session_server_impl customization points to
- * create the per-Client_app arena as needed at just the right moment during the log-in process; then
- * the shm::classic::Server_session_impl saves that pointer for quick return via `this->app_shm()`.
+ * However, by definition, a given per-app arena is to stay alive at least until the entire server
+ * (shm::classic::Session_server) is destroyed; resources (including transport::struc::Msg_out) residing in an
+ * app_shm()-returned arena stay around potentially over 2+ sessions and can be shared via any of them (as long as
+ * they apply to the same Client_app).  Because of this more-than-session lifetime, the app_shm()-returned arenas are
+ * actually tracked in the parent shm::classic::Session_server; it uses one of the Session_server_impl customization
+ * points to create the per-Client_app arena as needed at just the right moment during the log-in process; then
+ * the shm::classic::Server_session_impl saves a shared handle to it for quick return via `this->app_shm()` (hence
+ * the arena lives until the server and every such session are gone).
  * The same arena can also be accessed from the central store via shm::classic::Session_server::app_shm()
  * (which takes a `const Client_app&` and looks it up in an internal map).
  *
  * Other than that, per-app-scope arenas are created and remembered similarly to per-session-scope ones:
  * create (centrally across server-sessions, on-demand) in `CREATE_ONLY` mode; retain (in each relevant
- * server-session) a pointer for return via `this->app_shm()`.  See shm::classic::Server_session_impl doc header
+ * server-session) a shared handle for return via `this->app_shm()`.  See shm::classic::Server_session_impl doc header
  * and code inside shm::classic::Server_session_impl::async_accept_log_in().
  *
  * So then to recap:

@@ -47,6 +47,7 @@ set(DEP_LIBS_PKG_ARG_LISTS "IpcSession ${DEP_IPC_SESSION_VERSION} CONFIG")
 # Ideally keep this in `find -s` order.
 set(SRCS
     ipc/session/detail/shm/classic/session_shared_name.cpp
+    ipc/shm/bipc_ext/detail/sparse_shm_object.cpp
     ipc/shm/classic/error.cpp
     ipc/shm/classic/pool_arena.cpp
     ipc/shm/classic/pool_arena_stats.cpp
@@ -61,6 +62,7 @@ set(HDRS
     ipc/session/detail/shm/classic/client_session_impl.hpp
     ipc/session/detail/shm/classic/server_session_impl.hpp
     ipc/session/detail/shm/classic/session_impl.hpp
+    ipc/session/detail/shm/classic/session_server_dtl.hpp
     ipc/session/shm/classic/classic.hpp
     ipc/session/shm/classic/classic_fwd.hpp
     ipc/session/shm/classic/client_session.hpp
@@ -69,6 +71,9 @@ set(HDRS
     ipc/session/shm/classic/session_server.hpp
     ipc/session/shm/shm.hpp
     ipc/session/shm/shm_fwd.hpp
+    ipc/shm/bipc_ext/detail/bipc_ext_fwd.hpp
+    ipc/shm/bipc_ext/detail/sparse_managed_shm.hpp
+    ipc/shm/bipc_ext/detail/sparse_shm_object.hpp
     ipc/shm/classic/classic.hpp
     ipc/shm/classic/classic_fwd.hpp
     ipc/shm/classic/error.hpp

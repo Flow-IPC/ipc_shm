@@ -18,7 +18,8 @@
 /// @file
 #pragma once
 
-#include "ipc/util/shared_name_fwd.hpp"
+#include <ostream>
+#include <string>
 
 /// ipc::shm sub-module with the SHM-classic SHM-provider.  See ipc::shm doc header for introduction.
 namespace ipc::shm::classic
@@ -29,9 +30,6 @@ namespace ipc::shm::classic
 // Find doc headers near the bodies of these compound types.
 
 class Pool_arena;
-
-/// Short-hand for util::Shared_name; used in particular for SHM pool names at least.
-using Shared_name = util::Shared_name;
 
 // Free functions.
 

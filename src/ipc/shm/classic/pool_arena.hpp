@@ -23,6 +23,8 @@
 #include "ipc/shm/stl/stateless_allocator.hpp"
 #include "ipc/shm/stl/arena_activator.hpp"
 #include "ipc/shm/shm_stats.hpp"
+#include "ipc/shm/shm_fwd.hpp"
+#include "ipc/shm/bipc_ext/detail/sparse_managed_shm.hpp"
 #include "ipc/util/shared_name.hpp"
 #include "ipc/util/util.hpp"
 #include "ipc/util/util_fwd.hpp"
@@ -30,7 +32,6 @@
 #include <flow/util/basic_blob.hpp>
 #include <flow/util/stat/stat_set.hpp>
 #include <flow/util/util.hpp>
-#include <boost/interprocess/managed_shared_memory.hpp>
 #include <boost/interprocess/indexes/flat_map_index.hpp>
 #include <cstdint>
 #include <cstring>
@@ -315,9 +316,9 @@ public:
    *        The applied permissions shall *ignore* the process umask and shall thus exactly match `perms_on_create`,
    *        unless an error occurs.
    * @param pool_sz
-   *        The value to be returned by arena_size().  See potentially non-trivial notes on that method,
-   *        particularly regarding the viability of setting this to a large value + effect thereof on actual RAM
-   *        use over time.
+   *        The value to be returned by arena_size() (ignored unless creation occurs).  See potentially non-trivial
+   *        notes on that method, particularly regarding the viability of setting this to a large value + effect
+   *        thereof on actual RAM use over time.
    * @param err_code
    *        See `flow::Error_code` docs for error reporting semantics.  #Error_code generated:
    *        various.  Most likely creation failed due to permissions, or it already existed.
@@ -719,13 +720,16 @@ private:
    * to-do yet.
    *
    * We use, in a very limited way and only for internal purposes, the
-   * atomic-construct/find-object-in-SHM-pool feature of `bipc::managed_shared_memory`.  Insertion occurs
-   * only at init, so `flat_map_index` is fine.  If we stop needing the feature, replace with `null_index`
-   * to save some RAM.
+   * atomic-construct/find-object-in-SHM-pool feature of the `bipc::managed_shared_memory`-like `Pool::core()`.
+   * Insertion occurs only at init, so `flat_map_index` is fine.  If we stop needing the feature, replace with
+   * `null_index` to save some RAM.
    *
    * Notice that #Mem_algo shall use an (in-SHM) mutex around the meat of allocate() and deallocate().
+   *
+   * It is a bipc_ext::Sparse_managed_shm, as opposed to `bipc::managed_shared_memory`, so that the pool is
+   * sparse (takes RAM page by page as written to) rather than fully committed at creation; see its doc header.
    */
-  using Pool = ::ipc::bipc::basic_managed_shared_memory<char, Mem_algo, ::ipc::bipc::flat_map_index>;
+  using Pool = bipc_ext::Sparse_managed_shm<Mem_algo, ::ipc::bipc::flat_map_index>;
 
   /**
    * The data structure stored in SHM corresponding to an original construct()-returned #Handle;
@@ -942,7 +946,7 @@ bool Pool_arena::is_obj_in_arena(const T* obj) const
   // As in is_addr_in_arena(); avoid wraps via + while using known-non-negative-result subtractions.
   return sizeof(T)
          <= (arena_size() - (reinterpret_cast<uintptr_t>(obj)
-                             - reinterpret_cast<uintptr_t>(m_pool->get_address())));
+                             - reinterpret_cast<uintptr_t>(m_pool->address())));
 }
 
 template<typename T, typename... Ctor_args>
@@ -1045,7 +1049,7 @@ Pool_arena::Blob Pool_arena::lend_object(const Handle<T>& handle)
    * ref_count_up() + ref_count_down() implementation.  At least the ++ part is totally uncontroversial. */
 
   const ptrdiff_t offset_from_pool_base = reinterpret_cast<uintptr_t>(handle_state)
-                                          - reinterpret_cast<uintptr_t>(m_pool->get_address());
+                                          - reinterpret_cast<uintptr_t>(m_pool->address());
 
   Blob serialization{sizeof(offset_from_pool_base)};
   *(reinterpret_cast<ptrdiff_t*>(serialization.data())) = offset_from_pool_base;
@@ -1103,7 +1107,7 @@ Pool_arena::Handle<T> Pool_arena::borrow_object(const Blob& serialization)
 
   const auto handle_state
     = reinterpret_cast<Shm_handle*>
-        (reinterpret_cast<uintptr_t>(m_pool->get_address()) + offset_from_pool_base);
+        (reinterpret_cast<uintptr_t>(m_pool->address()) + offset_from_pool_base);
 
   /* Reminder: Shm_handle=Handle_in_shm<Value> -- our *handle_state in particular -- includes both the `Value` and
    * the metadata (m_atomic_owner_ct, m_cting_process_id as of this writing).  Hence this is a good safety check: */

@@ -18,6 +18,7 @@
 /// @file
 #pragma once
 
+#include "ipc/util/shared_name_fwd.hpp"
 #include <string>
 
 /**
@@ -143,6 +144,9 @@ namespace ipc::shm
 {
 
 // Types.
+
+/// Short-hand for util::Shared_name; used in particular for SHM pool names at least.
+using Shared_name = util::Shared_name;
 
 // Find doc headers near the bodies of these compound types.
 

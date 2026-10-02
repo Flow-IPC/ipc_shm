@@ -187,8 +187,8 @@ public:
    * if it's done with IPC, it's done with SHM in this context.  Two, triggered by opposing side
    * (`Server_session`).  That means *that* process is done with IPC (probably planning to terminate gracefully).
    * In that case it's also moot: per-app-scope, or any scope maintained by ipc::session, does not (by definition)
-   * outlive the `Session_server`; and `Session_server` dying is the standard cause of a `Server_session`
-   * being destroyed from a server-local trigger.
+   * outlive the server *process*; and a server-local trigger for destroying a `Server_session` normally means that
+   * process is winding down its `Session_server` too.
    *
    * In other words: from a *client* point of view, app_shm() and session_shm() are not qualitatively different;
    * they both exist and are mutually segregated, but that's it.  Their lifetimes in a given *client* are the same.
@@ -233,8 +233,9 @@ public:
    *       and with the same Server_session_mv::client_app()) also always returns `&A`,
    *       and the `A` is that very same #Arena again.
    *   - `A` can be accessed until the server object `X` (whose `X.async_accept()` yielded the contents of `*this`)
-   *     is destroyed.  It is improper (behavior undefined) for code in this process to access any objects
-   *     residing in SHM areas `A` past that point.
+   *     is destroyed -- or, if later, until the last shm::classic::Server_session from `X` with this Client_app is
+   *     destroyed: each holds a handle to `A`.  It is improper (behavior undefined) for code in this process to
+   *     access any objects residing in SHM areas `A` past that point.
    *     - However, crucially, it is both proper and intended that `A` (along with objects residing therein) is used
    *       across 1+ `shm::classic::Server_session`s sharing the same Client_app, all the way up to the death
    *       of the parent `Session_server`.

@@ -58,7 +58,7 @@ Pool_arena::Pool_arena(Mode_tag mode_tag, flow::log::Logger* logger_ptr,
   util::op_with_possible_bipc_exception
     (get_logger(), err_code, error::Code::S_SHM_BIPC_MISC_LIBRARY_ERROR, "Pool_arena(): Pool()", [&]()
   {
-    m_pool.emplace(mode_tag, m_pool_name.native_str(), pool_sz, nullptr, perms);
+    m_pool.emplace(mode_tag, m_pool_name, pool_sz, perms);
     init_arena_metadata(); // If the above did not throw then do this.
   });
 } // Pool_arena::Pool_arena()
@@ -92,15 +92,7 @@ Pool_arena::Pool_arena(flow::log::Logger* logger_ptr,
   util::op_with_possible_bipc_exception(get_logger(), err_code, error::Code::S_SHM_BIPC_MISC_LIBRARY_ERROR,
                                         "Pool_arena(OPEN_ONLY): Pool()", [&]()
   {
-    if (read_only)
-    {
-      m_pool.emplace(::ipc::bipc::open_read_only, m_pool_name.native_str());
-    }
-    else
-    {
-      m_pool.emplace(util::OPEN_ONLY, m_pool_name.native_str());
-    }
-
+    m_pool.emplace(util::OPEN_ONLY, m_pool_name, read_only);
     init_arena_metadata(); // If the above did not throw then do this.
   });
 } // Pool_arena::Pool_arena()
@@ -111,7 +103,7 @@ void Pool_arena::init_arena_metadata()
   using flow::util::stat::print;
 
   // It'll lock internal mutex, create Arena_metadata{} or find it, unlock, return pointer.  We get our singleton.
-  m_arena_metadata = m_pool->find_or_construct<Arena_metadata>(unique_instance, std::nothrow)();
+  m_arena_metadata = m_pool->core()->find_or_construct<Arena_metadata>(unique_instance, std::nothrow)();
   assert(m_arena_metadata
          && "Could neither find nor construct the singleton; but construct would occur first-thing on pool "
             "creation; yet somehow that ran out of pool_sz space?  Must be some pathological misuse or bug.");
@@ -160,7 +152,7 @@ void* Pool_arena::allocate(size_t n)
   {
     const auto total = arena_size();
     const auto prev_free = arena_stat_free_size();
-    const auto ret = m_pool->allocate(n); // Can throw (hence we can throw as advertised).
+    const auto ret = m_pool->core()->allocate(n); // Can throw (hence we can throw as advertised).
     const auto now_free = arena_stat_free_size();
     assert(total == arena_size());
 
@@ -173,7 +165,7 @@ void* Pool_arena::allocate(size_t n)
   }
   // else
 
-  return m_pool->allocate(n); // Can throw (hence we can throw as advertised).
+  return m_pool->core()->allocate(n); // Can throw (hence we can throw as advertised).
 } // Pool_arena::allocate()
 
 bool Pool_arena::deallocate(void* buf_not_null) noexcept
@@ -191,7 +183,7 @@ bool Pool_arena::deallocate(void* buf_not_null) noexcept
   {
     const auto total = arena_size();
     const auto prev_free = arena_stat_free_size();
-    m_pool->deallocate(buf_not_null); // Does not throw.
+    m_pool->core()->deallocate(buf_not_null); // Does not throw.
     const auto now_free = arena_stat_free_size();
     assert(total == arena_size());
 
@@ -203,7 +195,7 @@ bool Pool_arena::deallocate(void* buf_not_null) noexcept
   }
   else
   {
-    m_pool->deallocate(buf_not_null);
+    m_pool->core()->deallocate(buf_not_null);
   }
 
   return true;
@@ -214,7 +206,7 @@ bool Pool_arena::is_addr_in_arena(const void* p) const
   // Pre-requisite to this internal helper is: m_pool is non-null.
 
   const auto addr = reinterpret_cast<uintptr_t>(p);
-  const auto pool_base = reinterpret_cast<uintptr_t>(m_pool->get_address());
+  const auto pool_base = reinterpret_cast<uintptr_t>(m_pool->address());
   // Sidestep any (albeit very unlikely) wrap.
   return (addr >= pool_base) && ((addr - pool_base) < arena_size());
 }
@@ -223,7 +215,7 @@ size_t Pool_arena::arena_size() const
 {
   /* This does include any metadata (if we use a non-null_index index, ~hundreds of bytes; memory-algorithm
    * book-keeping).  So as advertised this should equal pool_sz to originally-pool-creating ctor. */
-  return m_pool ? m_pool->get_size() : 0;
+  return m_pool ? m_pool->size() : 0;
 }
 
 size_t Pool_arena::arena_stat_free_size() const
@@ -232,7 +224,7 @@ size_t Pool_arena::arena_stat_free_size() const
    * that can concurrently be modified, via concurrent [de]allocate().  The [de]allocate()s lock a central mutex,
    * but that's really about guarding the memory-algorithm internal data structures -- the modification of this
    * integer is in that locked-section, but this read isn't. */
-  return m_pool ? m_pool->get_free_memory() : 0;
+  return m_pool ? m_pool->core()->get_free_memory() : 0;
 }
 
 const stat::Arena_stats* Pool_arena::arena_stats() const

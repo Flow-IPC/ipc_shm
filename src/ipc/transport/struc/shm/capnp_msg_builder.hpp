@@ -28,7 +28,7 @@
 #include "ipc/transport/struc/shm/error.hpp"
 #include "ipc/transport/struc/shm/util.hpp"
 #include <flow/error/error.hpp>
-#include <boost/interprocess/containers/list.hpp>
+#include <boost/container/list.hpp>
 #include <cstdint>
 
 namespace ipc::transport::struc::shm
@@ -94,7 +94,7 @@ public:
    *
    * ### Choice of container type ###
    * In the past this was, first, `std::vector<uint8_t>` (which needed `Default_init_allocator` to avoid
-   * 0-filling during `.resize()` -- see lend()); then `bipc::vector<uint8_t>` (which needed
+   * 0-filling during `.resize()` -- see lend()); then `boost::container::vector<uint8_t>` (which needed
    * `.resize(n, default_init_t)` extension for the same reason ).  Then, as intended originally, it became
    * `flow::util::Basic_blob<>`.  Why that over `vector<uint8_t>`?  Answer: `Basic_blob`'s express purpose
    * is to do just this; some of its main documented aspects (lack of zero-init, iron-clad known perf) are
@@ -117,8 +117,8 @@ public:
    * The outer data structure stored in SHM representing the entire list of capnp-requested segments #Segment_in_shm.
    * Probably not needed (publicly) if one uses a Capnp_message_builder.
    *
-   * ### Rationale (`bipc::` vs `std::`) ###
-   * Why `bipc::list` and not `std::list`?  Answer:
+   * ### Rationale (`boost::container::` vs `std::`) ###
+   * Why `boost::container::list` and not `std::list`?  Answer:
    * `std::list`, at least in gcc-8.3.0, gave a compile error fairly clearly implying `std::list` stores
    * `Node*` instead of `Allocator<Node>::pointer`; in other words it is not compatible with SHM
    * (which bipc docs did warn people about -- but that could easily have been outdated).
@@ -126,7 +126,7 @@ public:
    * Curiously `std::vector` did not have that problem and worked fine, as far as that went, but we prefer
    * a linked-list here.
    */
-  using Segments_in_shm = bipc::list<Segment_in_shm, Allocator<Segment_in_shm>>;
+  using Segments_in_shm = boost::container::list<Segment_in_shm, Allocator<Segment_in_shm>>;
 
   // Constructors/destructor.
 
@@ -323,7 +323,8 @@ public:
    * @internal
    * @todo Use `rebind` in the impl of Capnp_message_reader::Segments_in_shm_borrowed.
    */
-  using Segments_in_shm_borrowed = bipc::list<Segment_in_shm_borrowed, Borrower_allocator<Segment_in_shm_borrowed>>;
+  using Segments_in_shm_borrowed
+    = boost::container::list<Segment_in_shm_borrowed, Borrower_allocator<Segment_in_shm_borrowed>>;
 
   // Constructors/destructor.
 
@@ -551,11 +552,12 @@ bool Capnp_message_builder<Shm_arena>::lend(Capnp_root_builder* capnp_root, Sess
        * It just adjusts an internal m_size thing.  Suppose `n <= capacity()` (always the case for us and ensured
        * above).  Suppose now though that `.size() < n`.  It works fine in Blob: we wrote past .size() but not
        * past .capacity(), and the .resize() "corrects" m_size accordingly.  With vector<uint8_t>, without taking
-       * special measures (std::vector<Default_init_allocator<...>> or bipc::vector<>::resize(n, default_init))
-       * it would also catastrophically (for us) zero-fill the bytes between size() and n: If lend()
-       * is being called on a *this that has already been lend()ed -- the case in particular where an
-       * out-message is serialized, sent, modified (to require more space in an existing segment),
-       * serialized again, sent again.  Then this .resize() would zero out the added new bytes in the serialization!
+       * special measures (std::vector<Default_init_allocator<...>> or
+       * boost::container::vector<>::resize(n, default_init)) it would also catastrophically (for us) zero-fill the
+       * bytes between size() and n: If lend() is being called on a *this that has already been lend()ed -- the case
+       * in particular where an out-message is serialized, sent, modified (to require more space in an existing
+       * segment), serialized again, sent again.  Then this .resize() would zero out the added new bytes in the
+       * serialization!
        * Uncarefully-written user code might even .initX(n) (where x = List or Data, say) a field that
        * was previously .initX(n)ed; capnp does not simply reuse the space but rather orphans the previous X
        * and creates a new List/Data X in a later, new part in the same segment (if there's space left).

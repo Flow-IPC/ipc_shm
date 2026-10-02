@@ -19,6 +19,8 @@
 #pragma once
 
 #include "ipc/session/session_fwd.hpp"
+#include "ipc/shm/classic/classic_fwd.hpp"
+#include <boost/shared_ptr.hpp>
 
 namespace ipc::session::shm::classic
 {
@@ -35,6 +37,21 @@ class Server_session_impl;
 
 template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 class Client_session_impl;
+
+template<typename Base_t>
+struct Session_server_dtl;
+
+/**
+ * Ref-counted handle to a SHM-classic arena (`Arena` memebr alias in the classes here), for the ones ipc::session
+ * maintains: per-session (`session_shm()`) and per-app (`app_shm()`).  A per-app arena is shared by the
+ * Session_server and each of its `Server_session`s w/r/t that Client_app; so it lives until they are all gone.
+ * So the ref-countedness is internally used for the app-scope arenas.
+ *
+ * As of this writing the session-scope `session_shm()`-used type could be non-ref-counted, but it's basically
+ * written once per `Session` and then just `.get()`ed subsequently, so there's no real perf question; we reuse
+ * it for convenience.
+ */
+using Arena_ptr = boost::shared_ptr<ipc::shm::classic::Pool_arena>;
 
 // Constants.
 

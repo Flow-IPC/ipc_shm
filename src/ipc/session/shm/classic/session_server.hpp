@@ -24,7 +24,8 @@
 #include "ipc/transport/struc/schema/common.capnp.h"
 #include "ipc/transport/struc/struc_fwd.hpp"
 #include "ipc/transport/transport_fwd.hpp"
-#include <boost/move/make_unique.hpp>
+#include <boost/make_shared.hpp>
+#include <boost/unordered/unordered_flat_map.hpp>
 
 namespace ipc::session::shm::classic
 {
@@ -36,6 +37,10 @@ namespace ipc::session::shm::classic
  * the session-server type that starts SHM-enabled sessions with SHM-classic provider
  * (ipc::shm::classic::Pool_arena).  Its API is identical to that of Session_server, except that it
  * emits #Server_session_obj that are shm::classic::Server_session and not vanilla #Server_session.  In addition:
+ *
+ * @note Lifetime recommendations and requirements -- the destruction order among `*this`, its sessions and their
+ *       channels; how long the app_shm() arenas live -- are in the same-named section of session::Session_server
+ *       doc header.
  *
  * ### Max pool size configuration API (optional) ###
  * If using this, as opposed to (at least) SHM-jemalloc provider (session::shm::arena_lend::jemalloc::Session_server),
@@ -53,9 +58,10 @@ namespace ipc::session::shm::classic
  *
  * We use 2 of 2 available customization points of `private` super-class Session_server_impl.  We:
  *   - pass-up a `per_app_setup_func()` that, given the new session's desired Client_app, creates-if-needed the per-app
- *     SHM-arena and keeps handle open as well as available via `this->app_shm(Client_app::m_name)`; and
+ *     SHM-arena and keeps handle open as well as available via `this->app_shm(app)`; and
  *   - parameterize Session_server_impl on shm::classic::Server_session which, during log-in, creates
- *     the per-session SHM-arena and keeps handle open; and saves `this->app_shm(Client_app::m_name)`.
+ *     the per-session SHM-arena and keeps handle open; and saves a shared handle to the former (via a `private`
+ *     `app_shm_ptr(app)`).
  *
  * shm::classic::Server_session doc header delves deeply into the entire impl strategy for setting up these arenas.
  * If you read/grok that, then the present class's impl should be straightforward to follow.
@@ -157,7 +163,8 @@ public:
    * after init_app_shm_as_needed() creates the pool: the whole idea is the pool is shared between different
    * sessions with the same (by value equality) Client_app, across different client processes in fact.
    *
-   * Hence we postpone it until this dtor, at which point all the sessions are definitely done-for.
+   * Hence we postpone it until this dtor: no further session can open; and any still-alive `Server_session` keeps
+   * its own handle to the pool, which survives the removal until every handle is gone.
    *
    * Why not do it later?  Answer: Session-server is done-for, if we are being invoked; the counterpart
    * `Client_session`s could not possibly hope to open the pool now, even if they somehow wanted to do so.  So why wait?
@@ -305,7 +312,8 @@ public:
   void mq_msg_size_limit(size_t limit);
 
   /**
-   * Returns pointer to the per-`app` SHM-arena, whose lifetime extends until `*this` is destroyed;
+   * Returns pointer to the per-`app` SHM-arena, whose lifetime extends until `*this`, and every
+   * shm::classic::Server_session of `app` from `*this`, are destroyed;
    * or null if that arena has not yet been successfully created (which is attempted during the log-in of the
    * first client of `app` to reach `*this` via async_accept()).  Alternatively you may use
    * shm::classic::Session_mv::app_shm() off any session object filled-out by `*this` async_accept(), as long as its
@@ -403,6 +411,12 @@ public:
   using flow::log::Log_context::get_log_component;
 
 private:
+  // Friends.
+
+  /// Facade type that exposes specific `private` APIs of `*this` to other internal Flow-IPC code.
+  template<typename T>
+  friend struct Session_server_dtl;
+
   // Types.
 
   /// Short-hand for #m_app_shm_mutex type.
@@ -436,6 +450,17 @@ private:
    */
   Error_code init_app_shm_as_needed(const Client_app& app);
 
+  /**
+   * Identical to app_shm() but returns a shared handle: For shm::classic::Server_session_impl (via
+   * Session_server_dtl), so that its per-app arena lives as long as the session does, even if `*this` does not.
+   * Same thread safety as app_shm().
+   *
+   * @param app
+   *        See app_shm().
+   * @return See app_shm().
+   */
+  Arena_ptr app_shm_ptr(const Client_app& app);
+
   // Data.
 
   /// See pool_size_limit_mi().
@@ -454,7 +479,7 @@ private:
    * The per-app-scope SHM arenas by App::m_name.  If it's not in the map, it has not been needed yet.
    * If it is but is null, it has been needed, but an error prevented its successful setup.
    */
-  boost::unordered_map<std::string, boost::movelib::unique_ptr<Arena>> m_app_shm_by_name;
+  boost::unordered_flat_map<std::string, Arena_ptr> m_app_shm_by_name;
 
   /**
    * Set of names of every SHM-pool created w/r/t #m_app_shm_by_name.  Each time an #Arena is added to
@@ -519,10 +544,11 @@ CLASS_CLSC_SESSION_SRV::Session_server(flow::log::Logger* logger_ptr, const Serv
    * We simply delete everything with the Shared_name prefix used when setting up app_shm() pools
    * (see init_app_shm_as_needed()) and session_shm() pools
    * (see shm::classic::Server_session_impl::async_accept_log_in()).  The prefix is everything up-to
-   * (not including) the PID (m_srv_namespace).  Our own m_srv_namespace was just determined and is unique
-   * across time by definition (internally, it's -- again -- our PID); so any existing pools are by
-   * definition old.  Note that as of this writing there is at most *one* active process (instance) of a
-   * given Server_app.
+   * (not including) the PID (m_srv_namespace).  Any pool found under it is old: per the documented lifetime
+   * requirements (session::Session_server doc header), no `Session` or channel from an earlier `Session_server` for
+   * this Server_app may still exist when we are constructed -- in any process, this one included (a
+   * `Session_server` following another in the same process has the same m_srv_namespace, our PID).  So we remove
+   * them all, regardless of any liveness consideration.
    *
    * A note on stats: Stats support for this cleanup point has been considered and deliberately omitted;
    * see similar note in session::Session_server_impl ctor (and a longer discussion in
@@ -578,7 +604,7 @@ size_t CLASS_CLSC_SESSION_SRV::pool_size_limit_mi() const
 TEMPLATE_CLSC_SESSION_SRV
 Error_code CLASS_CLSC_SESSION_SRV::init_app_shm_as_needed(const Client_app& app)
 {
-  using boost::movelib::make_unique;
+  using boost::make_shared;
 
   /* We are in some unspecified thread; actually *a* Session_server_impl thread Ws (a Server_session_impl thread W).
    * Gotta lock at least to protect from concurrent calls to ourselves on behalf of other async_accept()s. */
@@ -607,12 +633,19 @@ Error_code CLASS_CLSC_SESSION_SRV::init_app_shm_as_needed(const Client_app& app)
    * we can switch to a uint or atomic<uint> data member instead. */
 
   Error_code err_code;
-  app_shm = make_unique<Arena>(get_logger(), shm_pool_name, util::CREATE_ONLY,
+  app_shm = make_shared<Arena>(get_logger(), shm_pool_name, util::CREATE_ONLY,
                                size_t(1024 * 1024) * pool_size_limit_mi(),
                                util::shared_resource_permissions(m_srv_app_ref.m_permissions_level_for_client_apps),
                                &err_code);
-  /* Either err_code is truthy/app_shm is null; or vice versa.  In the former case just leave null in the map; meh.
-   * .erase()ing it from there is just pedantic at best.  (The [] lookup above will do the right thing next time.) */
+  if (err_code)
+  {
+    /* Careful: a failed Pool_arena ctor still yields a (non-null) object in a failed state.  Do not leave that in
+     * the map: app_shm(app) must keep returning null, and the next attempt for `app` must try again.  So leave null
+     * in the map; meh.  .erase()ing it from there is just pedantic at best.  (The [] lookup above will do the right
+     * thing next time.) */
+    app_shm.reset();
+  }
+  // Now either err_code is truthy/app_shm is null; or vice versa.
 
   /* Cool!  Let's return (and continue the log-in async op!).  ...Not so fast.  Almost.
    * Please now see the doc header for our dtor, where we promise -- on dtor invocation -- to remove all
@@ -665,14 +698,20 @@ Error_code CLASS_CLSC_SESSION_SRV::init_app_shm_as_needed(const Client_app& app)
 TEMPLATE_CLSC_SESSION_SRV
 typename CLASS_CLSC_SESSION_SRV::Arena* CLASS_CLSC_SESSION_SRV::app_shm(const Client_app& app)
 {
-  // We are in some unspecified thread; we promised thread safety form any concurrency situation.
+  return app_shm_ptr(app).get();
+}
+
+TEMPLATE_CLSC_SESSION_SRV
+Arena_ptr CLASS_CLSC_SESSION_SRV::app_shm_ptr(const Client_app& app)
+{
+  // We are in some unspecified thread; we promised thread safety from any concurrency situation.
 
   Lock_guard app_shm_lock{m_app_shm_mutex};
 
   /* Subtlety: Due to an intentional quirk of init_app_shm_as_needed(), if it's in the map, the ptr may still be null:
    * init_app_shm_as_needed() failed for app.m_name but does not erase in that case and just leaves null. */
   const auto map_it = m_app_shm_by_name.find(app.m_name);
-  return (map_it == m_app_shm_by_name.end()) ? nullptr : map_it->second.get();
+  return (map_it == m_app_shm_by_name.end()) ? Arena_ptr{} : map_it->second;
 }
 
 TEMPLATE_CLSC_SESSION_SRV
