@@ -64,6 +64,12 @@ public:
   /// Inherit ctor.
   using Base::Base;
 
+  /**
+   * Stops thread W before #Base's members are destroyed.
+   * See ~Server_session_impl() counterpart for the rationale which applies equally here.
+   */
+  ~Client_session_impl();
+
   // Methods.
 
   /**
@@ -136,6 +142,14 @@ private:
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define CLASS_CLSC_CLI_SESSION_IMPL \
   Client_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>
+
+TEMPLATE_CLSC_CLI_SESSION_IMPL
+CLASS_CLSC_CLI_SESSION_IMPL::~Client_session_impl()
+{
+  // See explanation in ~Server_session_impl().  Same deal here.
+  Base::Base::dtor_async_worker_stop();
+  // Thread W has been joined.
+}
 
 TEMPLATE_CLSC_CLI_SESSION_IMPL
 bool CLASS_CLSC_CLI_SESSION_IMPL::sync_connect(Error_code* err_code)

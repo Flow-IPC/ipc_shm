@@ -201,9 +201,19 @@ public:
 #define CLASS_CLSC_SRV_SESSION_IMPL \
   Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>
 
-// Only declared so it could be documented.  Please see async_accept_log_in(); it ensures the documented behavior.
+// Please see async_accept_log_in() as to how the documented behavior (pool cleanup) is ensured.
 TEMPLATE_CLSC_SRV_SESSION_IMPL
-CLASS_CLSC_SRV_SESSION_IMPL::~Server_session_impl() = default;
+CLASS_CLSC_SRV_SESSION_IMPL::~Server_session_impl()
+{
+  /* Base::Base (session::Server_session_impl) maintains thread W (async_worker()); and we do post onto it:
+   * async_accept_log_in() sets up the SHM arenas in thread W, assigning Base's (Session_impl's) arena handles there.
+   * Base::Base's dtor does stop thread W first-thing -- but by the time it runs, Base's members have already been
+   * destroyed (derived-class members go first).  Hence the documented contract of this protected guy: the terminal
+   * subclass's dtor must stop thread W itself, ~first-thing, so that Base's members can be destroyed in peace.
+   * (Cf. the SHM-jemalloc counterpart which does the same.) */
+  Base::Base::dtor_async_worker_stop();
+  // Thread W has been joined.
+}
 
 TEMPLATE_CLSC_SRV_SESSION_IMPL
 template<typename Session_server_impl_t,

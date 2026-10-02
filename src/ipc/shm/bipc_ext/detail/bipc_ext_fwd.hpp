@@ -20,7 +20,11 @@
 
 #include "ipc/common.hpp"
 
-/// XXX
+/**
+ * Extensions, informal or otherwise, of boost.ipc (`boost::interprocess`, bipc) SHM-related facilities, typically
+ * as needed by Flow-IPC internals but potentially exposed as public-facing when deemed to be opportunistically
+ * useful.
+ */
 namespace ipc::shm::bipc_ext
 {
 
