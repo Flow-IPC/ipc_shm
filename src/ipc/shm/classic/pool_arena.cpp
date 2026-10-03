@@ -21,6 +21,7 @@
 #include "ipc/shm/classic/error.hpp"
 #include "ipc/util/detail/util.hpp"
 #include "ipc/util/process_credentials.hpp"
+#include <flow/error/error.hpp>
 #include <flow/util/stat/stat_set.hpp>
 #include <new>
 
@@ -135,6 +136,59 @@ Pool_arena::~Pool_arena()
     FLOW_LOG_INFO("SHM-classic pool [" << *this << "]: ~Final state:\n" << dump << '.');
   }
   // else { arena_stats() would be null (invalid Pool_arena); nothing useful to dump. }
+}
+
+bool Pool_arena::commit(Error_code* err_code)
+{
+  FLOW_ERROR_EXEC_AND_THROW_ON_ERROR(bool, commit, _1);
+  // ^-- Call ourselves and return if err_code is null.  If got to present line, err_code is not null.
+
+  if (!m_pool)
+  {
+    err_code->clear();
+    return false;
+  }
+  // else
+
+  bool committed = false;
+  util::op_with_possible_bipc_exception(get_logger(), err_code, error::Code::S_SHM_BIPC_MISC_LIBRARY_ERROR,
+                                        "Pool_arena::commit()", [&]()
+  {
+    committed = m_pool->commit(); // false <=> handle closed earlier.  Throws on error (e.g., no-space-left).
+  });
+
+  if (*err_code)
+  {
+    FLOW_LOG_WARNING("SHM-classic pool [" << *this << "]: Commit (take RAM for) entire pool: failed (details "
+                     "above); pool remains as it was (sparse) and usable.");
+    return true;
+  }
+  // else
+
+  // TRACE-log in that no need to assume we are a rare call.  They can always INFO-log if desired.
+  if (committed)
+  {
+    FLOW_LOG_TRACE("SHM-classic pool [" << *this << "]: Commit (take RAM for) entire pool: done.");
+  }
+  else
+  {
+    FLOW_LOG_TRACE("SHM-classic pool [" << *this << "]: Commit (take RAM for) entire pool: no-op, as "
+                   "close_shm_object_handle() was called earlier.");
+  }
+  return committed;
+} // Pool_arena::commit()
+
+bool Pool_arena::close_shm_object_handle()
+{
+  if (!m_pool)
+  {
+    return false;
+  }
+  // else
+
+  FLOW_LOG_INFO("SHM-classic pool [" << *this << "]: Closing SHM-pool OS handle (commit() no longer possible).");
+  m_pool->close_shm_object_handle();
+  return true;
 }
 
 void* Pool_arena::allocate(size_t n)

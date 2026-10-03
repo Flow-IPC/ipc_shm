@@ -62,7 +62,7 @@
  *     applied to other memory managers; e.g., tcmalloc.  (At the moment we feel jemalloc is the most
  *     advanced and customizable open-source `malloc()`er around.)  Generally the memory-manager-agnostic aspects
  *     live in shm::arena_lend; while the SHM-jemalloc-specific ones go into shm::arena_lend::jemalloc.
- *     A major aspect of arena-lending SHM-providers is the separation of the the arena from the lend/borrow
+ *     A major aspect of arena-lending SHM-providers is the separation of the arena from the lend/borrow
  *     engine (SHM-session).  (Those aspects live in session::shm::arena_lend and session::shm::arena_lend::jemalloc;
  *     again, the memory-manager-agnostic and -non-agnostic aspects respectively.)  With an arena-lending SHM-provider,
  *     *each* of the two processes in a session creates/maintains its own arena, in which the other side cannot

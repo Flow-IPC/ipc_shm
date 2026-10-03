@@ -28,6 +28,7 @@
 #include <boost/noncopyable.hpp>
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 
 namespace ipc::shm::bipc_ext
 {
@@ -36,7 +37,7 @@ namespace ipc::shm::bipc_ext
 
 /**
  * Similar to bipc's `basic_managed_shared_memory`, except that if a ctor created the SHM-pool in the file-system,
- * then it will not have unconditinally taken the pool's entire specified size from RAM; while the added commit()
+ * then it will not have unconditionally taken the pool's entire specified size from RAM; while the added commit()
  * method is available to do so at any time.
  *
  * ### Background ###
@@ -54,7 +55,7 @@ namespace ipc::shm::bipc_ext
  * The problem one faces is that, as of this writing and for a long time now, it is not possible to just slot-in
  * a sparseness-capable thing like Sparse_shm_object instead of the potentially-not-sparseness-capable
  * `shared_memory_object`.  I.e., `basic_managed_shared_memory` hard-codes the use of `shared_memory_object`,
- * so there's nothing one can readily to do achieve that "even more desirable" thing.
+ * so there's nothing one can readily do to achieve that "even more desirable" thing.
  *
  * Therefore in the present Sparse_managed_shm we provide that alternative to `basic_managed_shared_memory`.
  *
@@ -88,7 +89,7 @@ namespace ipc::shm::bipc_ext
  *       full SHM-pool but rather after a certain small #S_SEGMENT_OFFSET from that base.  So to get the
  *       expected SHM-pool base vaddr, use address() which will properly subtract #S_SEGMENT_OFFSET.
  *     - Accordingly `this->core()->get_size()` is the size from the start of #Segment to the end of the pool.
- *       So to get the SHM-pool's full size, use size() which properly add #S_SEGMENT_OFFSET.
+ *       So to get the SHM-pool's full size, use size() which properly adds #S_SEGMENT_OFFSET.
  *
  * `shrink_to_fit()` and `grow()` are not provided.  For now there are also no move semantics (though this would
  * likely be easy to add).
@@ -112,8 +113,8 @@ namespace ipc::shm::bipc_ext
  *     faces at the start: get SHM-handle/possibly create SHM-pool (`shm_open()`), size it in the latter case
  *     (`ftruncate()`), map the vaddr region (`mmap()`).  Then plop a bipc `segment_manager` of the desired type
  *     (with desired memory-algorithm and object-index if any) at (near) the start of the SHM-pool.  (If opening
- *     an existing SHM-pool, then ensure the plopping has already fully occured.)  Done.
- *   - Unfortunately the way bipc achieves this is not straighforward; or rather it is not straightforwardly
+ *     an existing SHM-pool, then ensure the plopping has already fully occurred.)  Done.
+ *   - Unfortunately the way bipc achieves this is not straightforward; or rather it is not straightforwardly
  *     changeable.  Partially because the internal bipc machinery that achieves the
  *     plop-`segment_manager`-or-wait-until-plopped part -- in atomic fashion as promised -- is also (in addition to
  *     SHM) applied to other memory-mapped resources (files, XSI, pre-existing vaddr buffers), that machinery
@@ -210,7 +211,7 @@ private:
    *   - The `Device` type is `Sparse_shm_object` whose eponymous `truncate()` truncates/sizes as always -- but
    *     sparsely (does not RAM-commit it).
    *     - Because: That's our main thing; we need it to act this way unlike `shared_memory_object` (possibly) does.
-   *   - For `StoreDevice` flag is chosen to be `true`.  As a result, once the `Region` ctor maps the
+   *   - The `StoreDevice` flag is chosen to be `true`.  As a result, once the `Region` ctor maps the
    *     vaddr region to the SHM-pool's extent, it keeps the opened Sparse_shm_object (data-wise, the
    *     SHM-object handle/FD stored therein) instead of destroying it (=> closing the handle/FD; this does
    *     not harm the by-then-established mapping; and the SHM-pool lives at least as long as the mapping does).
@@ -287,7 +288,9 @@ public:
    * Commit (take RAM for) every page of the SHM-pool: forwards to Sparse_shm_object::commit() and returns
    * `true` normally.  However if invoked after close_shm_object_handle() it will no-op and return `false`.
    *
-   * Before close_shm_object_handle(): it is idempotent and usable at any time.
+   * Before close_shm_object_handle(): it is usable at any time and any number of times.  Each call commits whichever
+   * pages are not committed at that point; so a repeat call matters only if pages were decommitted since (holes
+   * punched, e.g., via Linux's `madvise(MADV_REMOVE)` on the mapping); otherwise it changes nothing.
    *
    * @warning See Sparse_shm_object::commit() doc header for key error-emission semantics and especially the
    *          suggestion to be ready for exceeding a RAM-use limit.
@@ -423,7 +426,7 @@ Sparse_managed_shm<Mem_algo, Index>::Sparse_managed_shm(util::Create_only, const
    *   -# In the pre-S_SEGMENT_OFFSET little area mark the completion of init. */
   m_region(util::CREATE_ONLY, pool_name.native_str(), pool_sz, bipc::read_write, nullptr, Construct_func{}, perms),
   /* Then this simply saves the address at offset S_SEGMENT_OFFSET as where Segment_manager begins.
-   * Note: Not CREATE_ONLY; Construnc_func{} did already what CREATE_ONLY would do.  Clean. */
+   * Note: Not CREATE_ONLY; Construct_func{} did already what CREATE_ONLY would do.  Clean. */
   m_segment(util::OPEN_ONLY, m_region.get_user_address(), m_region.get_user_size())
 {
   // Done.
@@ -472,7 +475,7 @@ bool Sparse_managed_shm<Mem_algo, Index>::Construct_func::operator()(void* addr,
 
   if (created)
   {
-    // Region placed us at pool-base + SEGMENT_OFFSET which must be, and is, aligned at least to Segment_manager.
+    // Region placed us at pool-base + S_SEGMENT_OFFSET which must be, and is, aligned at least to Segment_manager.
     assert((reinterpret_cast<uintptr_t>(addr) % alignof(Segment_manager)) == 0);
 
     /* basic_managed_shared_memory does some redundant checking here too; we just get on with it.

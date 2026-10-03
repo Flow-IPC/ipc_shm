@@ -69,10 +69,8 @@ namespace ipc::shm::classic
  *     havoc in your application.
  *     - Possible contingency: You may set the max pool size to a giant value.  This will *not* take it from
  *       the OS like Linux: only when a page is actually touched, such as by allocating in it, does that actual
- *       RAM get assigned to your application(s).  There is unfortunately, at least in Linux, some configurable
- *       kernel parameters as to the sum of max pool sizes active at a given time -- `ENOSPC` (No space left on device)
- *       may be emitted when trying to open a pool beyond this.  All in all it is a viable approach but may need
- *       a measure of finesse.
+ *       RAM get assigned to your application(s).  See the section on RAM use below.  All in all it is a viable
+ *       approach but may need a measure of finesse.
  *   - The ability to allocate in a given backing pool via any process's Pool_arena handle to that
  *     backing pool -- not to mention deallocate in process B what was allocated in process A -- requires
  *     guaranteed read-write capability in all `Pool_arena`s accessing a given pool.  That read-write capability
@@ -135,7 +133,8 @@ namespace ipc::shm::classic
  *     cleanup via remove_persistent().
  *
  * Thread safety: On a given `*this` all APIs are safe to call concurrently unless stated otherwise (or qualified)
- * in a specific API's doc header (as of this writing: arena_stats_reset(), local_stats_reset()).
+ * in a specific API's doc header (as of this writing: arena_stats_reset(), local_stats_reset()) -- with one more
+ * exception: commit() and close_shm_object_handle() must not be called concurrently with each other.
  *
  * Performance: We omit a high-level assessment here; it depends on the use-case, and a `*this` provides access to
  * essentially a memory-manager/heap which is a very general data structure.  The most relevant factors to use in
@@ -148,6 +147,17 @@ namespace ipc::shm::classic
  *       on behalf of `T` from its ctor and other allocating ops, if `T` is *or involves* STL-compliant type(s)
  *       that use(s) (SHM-enabled) allocator(s) (such as the recommended stl::Stateless_allocator).
  *     - Each of those allocate() calls is likely to eventually involve a matching deallocate().
+ *
+ * ### RAM use: sparse by default; commit() if desired ###
+ * Creating a pool of size `pool_sz` does not take `pool_sz` bytes of RAM: a page of it takes RAM (is *committed*)
+ * only once first touched -- by allocation-algorithm book-keeping or by your data.  So a large `pool_sz` costs
+ * little up-front.  The flip side: should the system be out of RAM-for-SHM (Linux: the configurable size limit of
+ * the tmpfs underlying POSIX SHM) at the moment a new page is first touched, there is no error to report; the
+ * touching process is killed (SIGBUS).
+ *
+ * If you would rather pay up-front -- and learn of a shortage then, as a civilized error -- call commit(): it
+ * commits the entire pool, at any time after construction.  Conversely, if you know you won't do so, you may call
+ * close_shm_object_handle() to release the OS handle (FD) kept around (one per `*this`) for `commit()`'s sake.
  *
  * ### Allocation API and how to properly use it ###
  * The most basic and lowest-level API consists of allocate() and deallocate().  We recommend against
@@ -291,9 +301,6 @@ public:
    * @param err_code
    *        See `flow::Error_code` docs for error reporting semantics.  #Error_code generated:
    *        various.  Most likely creation failed due to permissions, or it already existed.
-   *        An `ENOSPC` (No space left on device) error means the aforementioned kernel parameter has been
-   *        hit (Linux at least); pool size rebalancing in your overall system may be required (or else one
-   *        might tweak the relevant kernel parameter(s)).
    */
   explicit Pool_arena(flow::log::Logger* logger_ptr, const Shared_name& pool_name,
                       util::Create_only mode_tag, size_t pool_sz,
@@ -415,6 +422,45 @@ public:
    */
   template<typename Handle_name_func>
   static void for_each_persistent(const Handle_name_func& handle_name_func);
+
+  /**
+   * Commits (takes RAM for) every page of the pool not yet committed, so that subsequent use of the pool cannot fail
+   * for lack of RAM.  Returns `false` without doing anything if no pool is
+   * attached to `*this`; or after close_shm_object_handle().  Otherwise returns `true`.
+   *
+   * @see class doc header section on RAM use.
+   *
+   * It can be called on any `*this` accessing the pool, regardless of whether it created the pool (except one opened
+   * with `read_only`: that may emit an error), at any time, any number of times.  A repeat call does nothing unless
+   * pages were decommitted since (holes punched, e.g., in Linux via `madvise(MADV_REMOVE)` on the mapping).
+   *
+   * Be ready for it to fail when the attempt would exceed a system limit on RAM use (Linux: the configurable size
+   * limit of the tmpfs underlying POSIX SHM; might default to half of physical RAM or, in containers, something like
+   * 64Mi bytes).  In that case the pool remains as it was (sparse) and fully usable; and commit() may
+   * be retried later.
+   *
+   * Logs WARNING on error; other at most TRACE-logs.
+   *
+   * @param err_code
+   *        See `flow::Error_code` docs for error reporting semantics.  #Error_code generated:
+   *        various.  Most likely it'll be the no-space-left error described above: this would likely be a
+   *        `no_space_on_device` code.
+   * @return `true` if the operation was attempted (even if `*err_code` came out truthy!);
+   *         `false` if no-op (see above: ctor failed to attach a pool; or already did close_shm_object_handle()).
+   */
+  bool commit(Error_code* err_code = nullptr);
+
+  /**
+   * Closes the pool's OS handle (FD) that `*this` keeps open only to enable commit(), returning that resource to the
+   * system; `*this` remains otherwise fully operational, except that commit() shall subsequently no-op.  Returns
+   * `false` without doing anything if no pool is attached to `*this`.  Idempotent.
+   *
+   * Once you know you won't commit() (ever or subsequently), it is reasonable to call this, if FDs are
+   * a concern as a resource.
+   *
+   * @return `false` if ctor failed to attach a pool; else `true` (also logs INFO message).
+   */
+  bool close_shm_object_handle();
 
   /**
    * Allocates buffer of specified size, in bytes, in the accessed pool; returns locally-derefernceable address
@@ -573,8 +619,7 @@ public:
    * @note OS, namely Linux, shall not in fact take (necessarily) this full amount from general
    *       availability but rather a small amount.  Chunks of RAM (pages) shall be later reserved as they begin to
    *       be used, namely via the allocation API.  It may be viable to set this to a quite large value to
-   *       avoid running out of pool space.  However watch out for (typically configurable) kernel parameters
-   *       as to the sum of sizes of active pools.
+   *       avoid running out of pool space.
    * @note It is not named `stat_arena_size()` to indicate it's more of a config value rather than a dynamically-moving
    *       stat.  See also arena_stat_free_size().
    *
@@ -727,7 +772,7 @@ private:
    * Notice that #Mem_algo shall use an (in-SHM) mutex around the meat of allocate() and deallocate().
    *
    * It is a bipc_ext::Sparse_managed_shm, as opposed to `bipc::managed_shared_memory`, so that the pool is
-   * sparse (takes RAM page by page as written to) rather than fully committed at creation; see its doc header.
+   * sparse (takes RAM page by page as touched) rather than fully committed at creation; see its doc header.
    */
   using Pool = bipc_ext::Sparse_managed_shm<Mem_algo, ::ipc::bipc::flat_map_index>;
 

@@ -82,7 +82,7 @@ void Sparse_shm_object::commit()
   int err;
   do
   {
-    err = ::posix_fallocate(get_mapping_handle().handle, 0, length);
+    err = posix_fallocate(get_mapping_handle().handle, 0, length);
   }
   while (err == EINTR);
 

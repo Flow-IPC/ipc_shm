@@ -42,16 +42,18 @@ namespace ipc::session::shm::classic
  *       channels; how long the app_shm() arenas live -- are in the same-named section of session::Session_server
  *       doc header.
  *
- * ### Max pool size configuration API (optional) ###
- * If using this, as opposed to (at least) SHM-jemalloc provider (session::shm::arena_lend::jemalloc::Session_server),
- * you could potentially encounter "No space left on device" (`ENOSPC` in at least Linux) in async_accept().
- * This has nothing to do with drive space, or even physical RAM in fact.  It has to do with certain kernel parameters
- * governing virtual SHM-mapped space.  If this becomes a problem then please look into
- * Session_server::pool_size_limit_mi() API.  See the doc header for the accessor for discussion.
+ * ### Pool size and RAM use (optional configuration) ###
+ * Each session's SHM pool, and each Client_app's, is sized per pool_size_limit_mi(); see its doc header.  The pools
+ * are *sparse*: a pool takes RAM only page by page, as it is used.  If you would rather a given pool take all its
+ * RAM up-front, call `commit()` on the arena -- a shm::classic::Pool_arena (our #Arena) -- obtained via
+ * the appropriate session's session_shm() or app_shm() (or our app_shm()).  See the RAM-use section of the
+ * shm::classic::Pool_arena doc header.
  *
- * In most cases it should not come up.
+ * In many cases none of this should need attention.  Power users of potentially larger amounts of RAM per
+ * SHM-arena may need to look into this topic (again -- see `Pool_arena` in that case).
  *
  * @internal
+ *
  * ### Implementation ###
  * See similar section of session::Session_server.  It explains why we sub-class Session_server_impl and even
  * how that's used for this SHM-classic scenario.  To reiterate:
@@ -65,6 +67,7 @@ namespace ipc::session::shm::classic
  *
  * shm::classic::Server_session doc header delves deeply into the entire impl strategy for setting up these arenas.
  * If you read/grok that, then the present class's impl should be straightforward to follow.
+ *
  * @endinternal
  *
  * @tparam MQ_TYPE_OR_NONE
@@ -205,16 +208,16 @@ public:
    * a `bad_alloc` exception will be thrown, and you're pretty much kaput.  So you should use a huge value!
    * And indeed the default is quite large.
    *
-   * Unfortunately, at least in Linux, there is nevertheless a system-wide limit against the sum of these
-   * SHM-pool virtual sizes.  This is a kernel parameter and is usually admin-configurable; it might default to
-   * half your physical RAM for example.  Therefore unfortunately if too much virtual space is used by active
-   * SHM-pools across the system, a Linux (at least) `ENOSPC` (No space left on device) error might result
-   * (in our case be passed to async_accept() completion handler).  In that case, you can either tweak
-   * the relevant kernel parameter(s); or use pool_size_limit_mi() mutator to reduce your pool sizes -- assuming
-   * of course it'll be sufficient for your allocation needs.
+   * There is, however, at least in Linux, a system-wide limit on the RAM taken by SHM-pools in this fashion (it
+   * is admin-configurable; it might default to half your physical RAM for example).  Should a pool page be first
+   * touched while that limit is reached, there is no error to report: the process is killed (SIGBUS).  If you
+   * would rather learn of such a shortage early and civilly, call `commit()` on the arena(s) in question; see the
+   * RAM-use section of the shm::classic::Pool_arena doc header.  For power users of RAM-hungrier SHM-classic
+   * arenas, there may be a real trade-off there: commit() but have to be stingy with max pool size, or accept
+   * that total-SHM-used limit is potentially harshly enforced.
    *
-   * For most use cases none of this will be a problem.  If it becomes a problem, either use a solution above;
-   * or consider ipc::session::shm::arena_lend::jemalloc::Session_server (SHM-jemalloc) which is a multi-pool
+   * For most use cases none of this will be a problem.  If a fixed per-pool size is a problem, consider
+   * ipc::session::shm::arena_lend::jemalloc::Session_server (SHM-jemalloc) which is a multi-pool
    * system that adjusts dynamically without your having to worry about it at all.
    *
    * @return See above.
@@ -240,9 +243,7 @@ public:
    *
    * Additional (to those documented for Session_server::async_accept()) #Error_code generated and passed to
    * `on_done_func()`: See shm::classic::Pool_arena ctor doc header.  The most likely reason for failure of that
-   * code in this context is a permissions issue creating the SHM pool, or `ENOSPC` (Linux at least) a/k/a
-   * "No space left on device" if a kernel level for sum of pool sizes has been reached.  In this case consider
-   * pool_size_limit_mi() mutator and/or tweaking the kernel parameter.
+   * code in this context is a permissions issue creating the SHM pool.
    *
    * @tparam Task_err
    *         See above.
@@ -263,9 +264,7 @@ public:
    *
    * Additional (to those documented for session::Session_server::async_accept()) #Error_code generated and passed to
    * `on_done_func()`: See shm::classic::Pool_arena ctor doc header.  The most likely reason for failure of that
-   * code in this context is a permissions issue creating the SHM pool or `ENOSPC` (Linux at least) a/k/a
-   * "No space left on device" if a kernel level for sum of pool sizes has been reached.  In this case consider
-   * pool_size_limit_mi() mutator and/or tweaking the kernel parameter.
+   * code in this context is a permissions issue creating the SHM pool.
    *
    * @tparam Task_err
    *         See above.

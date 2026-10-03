@@ -45,7 +45,7 @@ namespace ipc::shm::bipc_ext
  * ### Background ###
  * `bipc::shared_memory_object`, whose documentation you should read before diving in here, is essentially
  * an OO representation of a SHM-pool handle as obtained from, at least, the POSIX-SHM `shm_open()`.  As such
- * it peforms the essential tasks of opening and/or creating the (POSIX) SHM-object (on construct) and closing it (on
+ * it performs the essential tasks of opening and/or creating the (POSIX) SHM-object (on construct) and closing it (on
  * destruction/overwrite/move-from); and truncation (sizing) to a given size.
  *
  * The basic *truncation* operation, as via POSIX `ftruncate()`, when applied to a SHM-object is classically
@@ -55,7 +55,7 @@ namespace ipc::shm::bipc_ext
  * that actual RAM.  In many cases, for larger pools, this is a *good* thing: RAM is committed, page by page, only
  * when it is touched subsequently.  So a 1Gi-sized (truncated) pool won't take a gig of RAM right away; and one
  * can be less stingy with the size argument, if subsequent SHM-pool use only touches the amount of space it
- * actually needs, and that amount isn't so big.  We can call this *sparse* use a SHM-object.
+ * actually needs, and that amount isn't so big.  We can call this *sparse* use of a SHM-object.
  *
  * `shared_memory_object::truncate()` performs this truncation operation.  Up to (not including) Boost-1.76,
  * its `truncate()` assumed sparse use by default and did just the above essentially.  However this also meant
@@ -80,7 +80,7 @@ namespace ipc::shm::bipc_ext
  *       commit() should still make *portable* sense (even though the cited Boost history and Linux-specific
  *       mentions do not directly apply).
  *
- * ### How this class helps ##
+ * ### How this class helps ###
  * Thus in this extension of `shared_memory_object`:
  *   - truncate() will only truncate (as it used to in earlier Boosts); it will not commit.
  *     SHM-pool sparse use is possible subsequently.
@@ -105,9 +105,9 @@ namespace ipc::shm::bipc_ext
  * The conceptual use-case is hopefully adequately explained above.  As for where one might instantiate
  * an actual `*this`:
  *   - One can do it directly.  Using bipc's `shared_memory_object` or this extension is easier and more portable
- *     that native `shm_open()` + `ftruncate()` + `posix_fallocate()` and the like.  (One still has to then
+ *     than native `shm_open()` + `ftruncate()` + `posix_fallocate()` and the like.  (One still has to then
  *     map it to vaddrs (`mapped_region`), typically, and possibly other operations.  Regardless, though,
- *     the SHM-object creation/truncation/closing are more convenient by using a `*this` rather that natively.)
+ *     the SHM-object creation/truncation/closing are more convenient by using a `*this` rather than natively.)
  *   - One can do it as part of higher-level bipc/bipc-like objects.  Namely consider `basic_managed_shared_memory`
  *     in bipc.  While, as of this writing, it cannot be directly configured to use `Sparse_shm_object` instead
  *     of its hard-coded use of `shared_memory_object`, nevertheless one can develop a class with similar or identical
@@ -141,7 +141,7 @@ public:
    *
    * Error semantics: bipc-style (throws bipc exception on error).
    *
-   * @note This method is named the same as the #Base method because (1) it is accurate, and (2) it easier to
+   * @note This method is named the same as the #Base method because (1) it is accurate, and (2) it is easier to
    *       develop a sparse-RAM `basic_managed_shared_memory` equivalent by plugging in Sparse_shm_object instead
    *       of `shared_memory_object`.
    *
