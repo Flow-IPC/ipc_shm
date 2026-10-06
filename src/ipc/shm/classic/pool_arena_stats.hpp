@@ -161,7 +161,8 @@ struct Arena_info_dump
 // Template implementations.
 
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Arena_stats* src_stats, Arena_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Arena_stats* src_stats, Arena_stats* target_stats,
                    Visitor&& visitor)
 {
   /* (See flow::util::stat doc header for background on declare_stats()/sub-struct composition.)
@@ -179,17 +180,20 @@ void declare_stats(std::string name_prefix, const Arena_stats* src_stats, Arena_
    *     (2) Pragmatically speaking that's because the individual stat-names in these sub-structs are sufficiently
    *     qualified as of this writing.  Hopefully that will not change. */
 
-  name_prefix += "obj.";
-  declare_stats(name_prefix,
+  using flow::util::stat::Stat_name;
+
+  const Stat_name obj_prefix{name_prefix, "obj."};
+  declare_stats(obj_prefix,
                 src_stats ? &src_stats->m_live_obj : nullptr, target_stats ? &target_stats->m_live_obj : nullptr,
                 visitor);
-  declare_stats(name_prefix,
+  declare_stats(obj_prefix,
                 src_stats ? &src_stats->m_obj : nullptr, target_stats ? &target_stats->m_obj : nullptr,
                 visitor);
 }
 
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Local_stats* src_stats, Local_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Local_stats* src_stats, Local_stats* target_stats,
                    Visitor&& visitor)
 {
   /* Some of the commentary inside declare_stats(Arena_stats) applies here; except that our sub-structs
@@ -197,15 +201,17 @@ void declare_stats(std::string name_prefix, const Local_stats* src_stats, Local_
    * stat-names would be mutually duplicate (e.g., m_disposer_count in m_{own|borrow}er_obj),
    * certainly leading to confusion. */
 
-  name_prefix += "obj.";
+  using flow::util::stat::Stat_name;
+
+  const Stat_name obj_prefix{name_prefix, "obj."};
   declare_stats
-    (name_prefix + "own.",
+    (Stat_name{obj_prefix, "own."},
      src_stats ? &src_stats->m_owner_obj : nullptr, target_stats ? &target_stats->m_owner_obj : nullptr, visitor);
   declare_stats
-    (name_prefix + "lnd.",
+    (Stat_name{obj_prefix, "lnd."},
      src_stats ? &src_stats->m_lender_obj : nullptr, target_stats ? &target_stats->m_lender_obj : nullptr, visitor);
   declare_stats
-    (name_prefix + "brw.",
+    (Stat_name{obj_prefix, "brw."},
      src_stats ? &src_stats->m_borrower_obj : nullptr, target_stats ? &target_stats->m_borrower_obj : nullptr, visitor);
 }
 

@@ -19,7 +19,7 @@
 #pragma once
 
 #include "ipc/util/shared_name_fwd.hpp"
-#include <string>
+#include <flow/util/stat/stat_fwd.hpp>
 
 /**
  * Modules for SHared Memory (SHM) support.  At a high level ipc::shm is a collection of sub-modules, each
@@ -188,7 +188,8 @@ struct Shared_arena_obj_stats;
  *        See above.
  */
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Owner_obj_stats* src_stats, Owner_obj_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Owner_obj_stats* src_stats, Owner_obj_stats* target_stats,
                    Visitor&& visitor);
 
 /**
@@ -208,7 +209,8 @@ void declare_stats(std::string name_prefix, const Owner_obj_stats* src_stats, Ow
  *        See above.
  */
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Lender_obj_stats* src_stats, Lender_obj_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Lender_obj_stats* src_stats, Lender_obj_stats* target_stats,
                    Visitor&& visitor);
 
 /**
@@ -228,7 +230,8 @@ void declare_stats(std::string name_prefix, const Lender_obj_stats* src_stats, L
  *        See above.
  */
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Borrower_obj_stats* src_stats, Borrower_obj_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Borrower_obj_stats* src_stats, Borrower_obj_stats* target_stats,
                    Visitor&& visitor);
 
 /**
@@ -248,7 +251,8 @@ void declare_stats(std::string name_prefix, const Borrower_obj_stats* src_stats,
  *        See above.
  */
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Live_obj_stats* src_stats, Live_obj_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Live_obj_stats* src_stats, Live_obj_stats* target_stats,
                    Visitor&& visitor);
 
 /**
@@ -268,7 +272,7 @@ void declare_stats(std::string name_prefix, const Live_obj_stats* src_stats, Liv
  *        See above.
  */
 template<typename Visitor>
-void declare_stats(std::string name_prefix,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
                    const Shared_arena_obj_stats* src_stats, Shared_arena_obj_stats* target_stats,
                    Visitor&& visitor);
 

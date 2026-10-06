@@ -498,7 +498,8 @@ struct Shared_arena_obj_stats
 // Template implementations.
 
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Owner_obj_stats* src_stats, Owner_obj_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Owner_obj_stats* src_stats, Owner_obj_stats* target_stats,
                    Visitor&& visitor)
 {
   FLOW_UTIL_STAT_DECLARE(m_n_shards, GAUGE);
@@ -512,14 +513,16 @@ void declare_stats(std::string name_prefix, const Owner_obj_stats* src_stats, Ow
 }
 
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Lender_obj_stats* src_stats, Lender_obj_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Lender_obj_stats* src_stats, Lender_obj_stats* target_stats,
                    Visitor&& visitor)
 {
   FLOW_UTIL_STAT_DECLARE(m_lend_count, ACCUMULATOR);
 }
 
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Borrower_obj_stats* src_stats, Borrower_obj_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Borrower_obj_stats* src_stats, Borrower_obj_stats* target_stats,
                    Visitor&& visitor)
 {
   FLOW_UTIL_STAT_DECLARE(m_borrow_count, ACCUMULATOR);
@@ -529,7 +532,8 @@ void declare_stats(std::string name_prefix, const Borrower_obj_stats* src_stats,
 }
 
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Live_obj_stats* src_stats, Live_obj_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Live_obj_stats* src_stats, Live_obj_stats* target_stats,
                    Visitor&& visitor)
 {
   FLOW_UTIL_STAT_DECLARE(m_live_objects, GAUGE);
@@ -539,7 +543,7 @@ void declare_stats(std::string name_prefix, const Live_obj_stats* src_stats, Liv
 }
 
 template<typename Visitor>
-void declare_stats(std::string name_prefix,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
                    const Shared_arena_obj_stats* src_stats, Shared_arena_obj_stats* target_stats,
                    Visitor&& visitor)
 {

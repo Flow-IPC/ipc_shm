@@ -131,9 +131,9 @@ Pool_arena::~Pool_arena()
   if (m_pool)
   {
     Info_dump dump; // Multi-line (default); m_fmt.m_verbose has no effect for SHM-classic.
-    info_dump(&dump);
-    // Note: info_dump() output has no trailing newline; we cap it with a period by our little convention.
-    FLOW_LOG_INFO("SHM-classic pool [" << *this << "]: ~Final state:\n" << dump << '.');
+    /* Note: info_dump() output has no trailing newline; we cap it with a period by our little convention.
+     * Note: Avoid unneeded info_dump() by placing it inside log-macro. */
+    FLOW_LOG_INFO("SHM-classic pool [" << *this << "]: ~Final state:\n" << (info_dump(&dump), dump) << '.');
   }
   // else { arena_stats() would be null (invalid Pool_arena); nothing useful to dump. }
 }

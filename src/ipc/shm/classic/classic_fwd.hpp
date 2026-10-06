@@ -18,8 +18,8 @@
 /// @file
 #pragma once
 
+#include <flow/util/stat/stat_fwd.hpp>
 #include <ostream>
-#include <string>
 
 /// ipc::shm sub-module with the SHM-classic SHM-provider.  See ipc::shm doc header for introduction.
 namespace ipc::shm::classic
@@ -94,7 +94,8 @@ std::ostream& operator<<(std::ostream& os, const Arena_info_dump& val);
  *        See above.
  */
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Arena_stats* src_stats, Arena_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Arena_stats* src_stats, Arena_stats* target_stats,
                    Visitor&& visitor);
 
 /**
@@ -114,7 +115,8 @@ void declare_stats(std::string name_prefix, const Arena_stats* src_stats, Arena_
  *        See above.
  */
 template<typename Visitor>
-void declare_stats(std::string name_prefix, const Local_stats* src_stats, Local_stats* target_stats,
+void declare_stats(const flow::util::stat::Stat_name& name_prefix,
+                   const Local_stats* src_stats, Local_stats* target_stats,
                    Visitor&& visitor);
 
 } // namespace ipc::shm::classic::stat
