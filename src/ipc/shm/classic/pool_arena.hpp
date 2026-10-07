@@ -507,7 +507,7 @@ public:
    * SHM pool, and returns a ref-counted handle that (1) guarantees destruction and deallocation shall occur
    * once no owners hold a reference; and (2) can be lent to other processes (and other processes still
    * indefinitely), thus adding owners beyond this process, via lend_object()/borrow_object().
-   * Returns null if no pool attached to `*this`.  Throws exception if ran out of space.
+   * Returns null if no pool attached to `*this`.  Throws exception if ran out of space. XXXdecide which exact exception, such as whether to normalize on std::bad_alloc or to let it be bipc::bad_alloc; it'd be good to be consistent with what SHMJ will do. Feeling like std::bad_alloc at the moment. / Same deal on allocate(); in fact determine/state it *there* and reference it here.
    *
    * Is better to use this than allocate() whenever possible; see class doc header notes on this.
    *
@@ -876,7 +876,12 @@ private:
 
   // Methods.
 
-  /// Boring helper of ctors: with the assumption that #m_pool is ready, sets up #m_arena_metadata.  Cannot fail.
+  /**
+   * Boring helper of ctors: with the assumption that #m_pool is ready, sets up #m_arena_metadata.  Throws bipc
+   * exception on failure, re-nullifying #m_pool first.  (As of Boost-1.87 the only conceivable errors are, we feel,
+   * failure to lock mutex -- other process crashed while holding it -- or the pool being so tiny as to not
+   * fit #Arena_metadata + internal bipc index stuff.)
+   */
   void init_arena_metadata();
 
   /**
@@ -999,6 +1004,7 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
 {
   using Value = T;
   using Shm_handle = Handle_in_shm<Value>;
+  using Atomic_owner_ct = typename Shm_handle::Atomic_owner_ct;
   using flow::util::stat::fetch_add;
   using flow::util::stat::update_hi_wmark;
   // using flow::util::construct_at; // C++20 => can conflict with incidentally included std:: counterpart.
@@ -1010,7 +1016,9 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
   }
   // else
 
+  // No space => throws bad_alloc as advertised.  Nothing else to clean up; let it rip.
   const auto handle_state = static_cast<Shm_handle*>(allocate(sizeof(Shm_handle)));
+
   // Buffer acquired but uninitialized.  Construct the owner count to 1 (just us: no lend_object() yet).
   flow::util::construct_at(&handle_state->m_atomic_owner_ct, 1);
   handle_state->m_cting_process_id = m_own_process_id; // Just a regular (immutable after this) integer.
@@ -1026,14 +1034,25 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
    * is_trivially_destructible_v<Value> here too is safe, even though it likely won't catch all the cases -- but
    * no false negatives, so it's safe.  Basically if it's trivially destructible, it can never allocate things
    * on its behalf in any sane way; so that fits the bill. */
-  if constexpr(std::is_trivially_destructible_v<Value>)
+  try
   {
-    flow::util::construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
+    if constexpr(std::is_trivially_destructible_v<Value>)
+    {
+      flow::util::construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
+    }
+    else
+    {
+      Activator ctx{this};
+      flow::util::construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
+    }
   }
-  else
+  catch (...)
   {
-    Activator ctx{this};
-    flow::util::construct_at(&handle_state->m_obj, std::forward<Ctor_args>(ctor_args)...);
+    /* T ctor threw: before letting it propagate might as well undo what preceded it above (same steps as in
+     * handle_deleter_impl(), minus ~T(), as ctor never completed) -- so as not to leak the buffer in SHM. */
+    (handle_state->m_atomic_owner_ct).~Atomic_owner_ct();
+    deallocate(static_cast<void*>(handle_state));
+    throw;
   }
 
   { // Stats.
@@ -1266,9 +1285,8 @@ void Pool_arena::handle_deleter_impl(Handle_in_shm<T>* handle_state, bool constr
     }
     (handle_state->m_atomic_owner_ct).~Atomic_owner_ct();
 
-    deallocate(static_cast<void*>(handle_state));
-
     destroy_type = ((handle_state->m_cting_process_id == m_own_process_id) ? S_OWN_PID : S_OTHER_PID);
+    deallocate(static_cast<void*>(handle_state));
   }
   else // if (prev_owner_ct > 1): It is now 1+; stays alive.  Done for now (other than stat-updating).
   {

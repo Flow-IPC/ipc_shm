@@ -60,7 +60,7 @@ Pool_arena::Pool_arena(Mode_tag mode_tag, flow::log::Logger* logger_ptr,
     (get_logger(), err_code, error::Code::S_SHM_BIPC_MISC_LIBRARY_ERROR, "Pool_arena(): Pool()", [&]()
   {
     m_pool.emplace(mode_tag, m_pool_name, pool_sz, perms);
-    init_arena_metadata(); // If the above did not throw then do this.
+    init_arena_metadata(); // If the above did not throw then do this (it also can throw, re-nullifying m_pool).
   });
 } // Pool_arena::Pool_arena()
 
@@ -82,7 +82,7 @@ Pool_arena::Pool_arena(flow::log::Logger* logger_ptr,
 
 Pool_arena::Pool_arena(flow::log::Logger* logger_ptr,
                        const Shared_name& pool_name_arg, util::Open_only, bool read_only, Error_code* err_code) :
-  flow::log::Log_context(logger_ptr, Log_component::S_TRANSPORT),
+  flow::log::Log_context(logger_ptr, Log_component::S_SHM),
   m_pool_name(pool_name_arg),
   m_own_process_id(util::Process_credentials::own_process_id()),
   m_arena_metadata(nullptr)
@@ -94,7 +94,7 @@ Pool_arena::Pool_arena(flow::log::Logger* logger_ptr,
                                         "Pool_arena(OPEN_ONLY): Pool()", [&]()
   {
     m_pool.emplace(util::OPEN_ONLY, m_pool_name, read_only);
-    init_arena_metadata(); // If the above did not throw then do this.
+    init_arena_metadata(); // If the above did not throw then do this (it also can throw, re-nullifying m_pool).
   });
 } // Pool_arena::Pool_arena()
 
@@ -103,25 +103,40 @@ void Pool_arena::init_arena_metadata()
   using ::ipc::bipc::unique_instance;
   using flow::util::stat::print;
 
-  // It'll lock internal mutex, create Arena_metadata{} or find it, unlock, return pointer.  We get our singleton.
-  m_arena_metadata = m_pool->core()->find_or_construct<Arena_metadata>(unique_instance, std::nothrow)();
-  assert(m_arena_metadata
-         && "Could neither find nor construct the singleton; but construct would occur first-thing on pool "
-            "creation; yet somehow that ran out of pool_sz space?  Must be some pathological misuse or bug.");
+  /* It'll lock internal mutex, create Arena_metadata{} or find it, unlock, return pointer.  We get our singleton.
+   * We use the throwing form (no std::nothrow), so either it throws, or it returns non-null. */
+  try
+  {
+    m_arena_metadata = m_pool->core()->find_or_construct<Arena_metadata>(unique_instance)();
+  }
+  catch (...)
+  {
+    m_pool.reset(); // As promised.
+    throw;
+  }
+  assert(m_arena_metadata && "That find_or_construct() form is supposed to either return non-null or throw.");
+
+  /* Note: It's tempting to perhaps use ->find_or_construct(std::nothrow) above and lose the try/catch.
+   * Check for null; if so then reset m_pool; return.  Or even posit that there is no real way that'd happen,
+   * so assert(m_arena_metadata) and return -- end of.
+   *
+   * (Arena_metadata{} ctor can't itself throw.  Incidentally, if it could and did, std::nothrow would not catch it.)
+   *
+   * Problem with it: The bipc docs don't in any way say this, and (as of Boost-1.87) the following is basically only
+   * detectable by bipc code inspection, but it actually can throw still: The internal mutex lock (1) can
+   * realistically fail (at least if other process crashes while holding mutex) and (2) bipc code doesn't
+   * check for that possibility the way it does the rest of the stuff.
+   *
+   * That alone is enough to make us stop trying to be precious w/r/t various error paths, which ones of those
+   * are real, and how they'd be emitted.  Just let it throw on any problem, and we'll emit that.  In the unlikely
+   * case there's indeed a problem, they'll at least have an Error_code and/or exception + possible log message
+   * (from our likely caller, the ctor) to help figure it out. */
 
   FLOW_LOG_INFO("SHM-classic pool [" << *this << "]: Stats at ctor (arena[] can change concurrently if pool "
                 "just-opened; ~zeroed if pool just-created): "
                 "arena[" << print(*(arena_stats())) << "]"
                 "[free=[" << arena_stat_free_size() << '/' << arena_size() << "]].");
 
-  /* Subtlety about the above: The nothrow satisfies our contract, which is that we can't fail; we treat failure
-   * as an impossibility (per the assert string).  Actually we're probably inside a thing that'll catch
-   * that exception, presumably a bipc bad_cast which is a bipc exception; so we could have just let it trap that
-   * and emit it in civilized fashion.  We choose to nothrow/"not fail" instead to cleanly express
-   * that we're not trying to deal with handling an impossible situation, as that would entail
-   * worrying about whether we'd really handle it, and that would technically entail trying to make
-   * that (impossible) thing happen in unit-testing -- you get the point.  Would rather treat it as undefined
-   * behavior and worry less... modulo this rather lengthy comment. */
   // local_stats() guaranteed zeroed at the moment.
 }
 
@@ -219,7 +234,7 @@ void* Pool_arena::allocate(size_t n)
   }
   // else
 
-  return m_pool->core()->allocate(n); // Can throw (hence we can throw as advertised).
+  return m_pool->core()->allocate(n); // Can throw (hence we can throw as advertised). XXXpossibly catch bipc bad_cast, rethrow as std:: (requires decision first, see earlier XXX)
 } // Pool_arena::allocate()
 
 bool Pool_arena::deallocate(void* buf_not_null) noexcept
