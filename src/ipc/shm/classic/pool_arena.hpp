@@ -185,6 +185,7 @@ namespace ipc::shm::classic
  * as `T` if desired.
  *
  * @internal
+ *
  * Impl notes: Stats
  * -----------------
  * One class of stats relevant here is the kind that would require updates in allocate() and deallocate().
@@ -209,6 +210,12 @@ namespace ipc::shm::classic
  *       `find_or_construct()`ed-as-`unique_instance` using this facility; save it in ctor.
  *       Update relevant stats via this pointer in allocate() and deallocate().  Use `atomic<>` and
  *       `flow::util::stat::fetch_add()` et al.
+ *       - Corner case: if constructed with util::OPEN_ONLY tag and `read_only = true`, then `find_or_construct()`
+ *         (which requires a mutex lock) is not available (forbidden by OS).  We must therefore use
+ *         `find_no_lock()`.  Moreover we tell the user in the ctor doc header that they must ensure
+ *         the pool has been created (via a creating ctor) before invoking the `read_only` ctor.  Full atomicity
+ *         is lost.  In practice, though, it is common in a SHM system to only publicize a pool-name after
+ *         fully creating/initializing the pool.
  *     - Per-`*this`: Simply store as a regular data member stats-`struct`.  Otherwise the same as the previous
  *       bullet.
  */
@@ -328,7 +335,7 @@ public:
    *        thereof on actual RAM use over time.
    * @param err_code
    *        See `flow::Error_code` docs for error reporting semantics.  #Error_code generated:
-   *        various.  Most likely creation failed due to permissions, or it already existed.
+   *        various.  Most likely creation failed due to permissions.
    */
   explicit Pool_arena(flow::log::Logger* logger_ptr, const Shared_name& pool_name,
                       util::Open_or_create mode_tag, size_t pool_sz,
@@ -338,6 +345,13 @@ public:
    * Construct Pool_arena accessor object to existing named SHM pool.  If it does not exist, it is an error.
    * If an error is emitted via `*err_code`, methods shall return sentinel/`false` values.
    *
+   * @warning Be careful with `read_only = true`.  See the requirements and notes below.  Furthermore note that
+   *          it is wrong to rely on error::Code::S_SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT as merely a safe
+   *          eventuality like pool-name-not-found.  That is: if it is indeed emitted, you only got lucky; it is
+   *          possible that, instead, the lockless internal check for initialized-state *does* pass, but the
+   *          internal metadata are in some halfway state.  Instead be sure to complete a creating-ctor invocation
+   *          (in any process) before attempting this ctor form.
+   *
    * @param logger_ptr
    *        Logger to use for subsequently logging.
    * @param pool_name
@@ -346,20 +360,24 @@ public:
    *        API-choosing tag util::OPEN_ONLY.
    * @param read_only
    *        If and only if `true` the calling process will be prevented by the OS from writing into the pages
-   *        mapped by `*this` subsequently.  Such attempts will lead to undefined behavior.
+   *        mapped by `*this` subsequently.  Such attempts will lead to undefined behavior (Linux: segmentation fault).
    *        Note that this includes any attempt at allocating as well as writing into allocated (or otherwise)
    *        address space.  Further note that, internally, deallocation -- directly or otherwise -- involves
    *        (in this implementation) writing and is thus also disallowed.  Lastly, and quite significantly,
-   *        borrow_object() can be called, but undefined behavior shall result when the resulting `shared_ptr`
-   *        (#Handle) group reaches ref-count 0, as internally that requires a decrement of a counter (which is
-   *        a write).  Therefore borrow_object() cannot be used either.  Therefore it is up to you, in that
+   *        borrow_object() cannot be called.  Therefore it is up to you, in that
    *        case, to (1) never call deallocate() directly or otherwise (i.e., through an allocator);
    *        and (2) to design your algorithms in such a way as to never require lending to this Pool_arena.
    *        In practice this would be quite a low-level, stunted use of `Pool_arena` across 2+ processes;
-   *        but it is not necessarily useless.  (There might be, say, test/debug/reporting use cases.)
+   *        but it is not necessarily useless.  (There might be, say, test/debug/reporting use cases.  In
+   *        particular it's possible to read arena_stats() which is a clean use-case.  See arena_stats() doc header.)
+   *        Lastly, a caution: Do not use this ctor form (with `read_only = true`) until you know `pool_name`
+   *        has been fully created/initialized via a creating ctor.
    * @param err_code
    *        See `flow::Error_code` docs for error reporting semantics.  #Error_code generated:
-   *        various.  Most likely creation failed due to permissions, or it already existed.
+   *        various.  Most likely `pool_name` could not be found, or an access control error, or --
+   *        with `read_only = true` only -- error::Code::S_SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT.
+   *        (If you see the latter you are not using the read-only ctor form properly as indicated above;
+   *        per the warning above undefined behavior could have occurred instead.)
    */
   explicit Pool_arena(flow::log::Logger* logger_ptr, const Shared_name& pool_name,
                       util::Open_only mode_tag, bool read_only = false, Error_code* err_code = nullptr);
@@ -464,25 +482,21 @@ public:
 
   /**
    * Allocates buffer of specified size, in bytes, in the accessed pool; returns locally-derefernceable address
-   * to the first byte.  Returns null if no pool attached to `*this`.  Throws exception if ran out of space.
+   * to the first byte.  Returns null if and only if no pool attached to `*this`.
    *
    * Take care to only use this when and as appropriate; see class doc header notes on this.
    *
-   * ### Rationale for throwing exception instead of returning null ###
-   * This does go against the precedent in most of ::ipc, which either returns sentinel values or uses
-   * Flow-style #Error_code based emission (out-arg or exception).  The original reason may appear somewhat arbitrary
-   * and is 2-fold:
-   *   - It's what bipc does (throws `bipc::bad_alloc_exception`), and indeed we propagate what it throws.
-   *   - It's what STL-compliant allocators (such as our own in shm::stl) must do; and they will invoke this
-   *     (certainly not exclusively).
+   * ### On running out of space ###
+   * If there is no space for `n` bytes and associated book-keeping: Throws exception `std::bad_alloc`.
    *
-   * I (ygoldfel) claim it's a matter of... synergy, maybe, or tradition.  It really is an exceptional situation to
-   * run out of pool space.  Supposing some system is built on-top of N pools, of which `*this` is one, it can certainly
-   * catch it (and in that case it shouldn't be frequent enough to seriously affect perf by virtue of slowness
-   * of exception-throwing/catching) and use another pool.  Granted, it could use Flow semantics, which would throw
-   * only if an `Error_code*` supplied were null, but that misses the point that allocate() failing to
-   * allocate due to lack of space is the only thing that can really go wrong and is exceptional.  Adding
-   * an `Error_code* err_code` out-arg would hardly add much value.
+   * @note Attention: that's `std::` and not `boost::interprocess::`.  This is intended to be consistent across
+   *       SHM-providers like SHM-classic and SHM-jemalloc (jemalloc::Ipc_arena::allocate()).
+   *
+   * It is salient that an allocator's (e.g., our stl::Stateless_allocator) `allocate()` may forward to us and is
+   * allowed to "throw exceptions" (no particular exception type is mandated or recommended).  So we are
+   * behaving consistently with letting an allocator's `allocate()` simply forward to this method (of some `*this`)
+   * and let it throw.  Assuming one operates on an active `*this` (that did not fail construction), there is no
+   * need to check for null return.
    *
    * @param n
    *        Desired buffer size in bytes.  Must not be 0 (behavior undefined/assertion may trip).
@@ -507,23 +521,41 @@ public:
    * SHM pool, and returns a ref-counted handle that (1) guarantees destruction and deallocation shall occur
    * once no owners hold a reference; and (2) can be lent to other processes (and other processes still
    * indefinitely), thus adding owners beyond this process, via lend_object()/borrow_object().
-   * Returns null if no pool attached to `*this`.  Throws exception if ran out of space. XXXdecide which exact exception, such as whether to normalize on std::bad_alloc or to let it be bipc::bad_alloc; it'd be good to be consistent with what SHMJ will do. Feeling like std::bad_alloc at the moment. / Same deal on allocate(); in fact determine/state it *there* and reference it here.
+   * Returns null if no pool attached to `*this`.  Throws on any other error (details below).
    *
    * Is better to use this than allocate() whenever possible; see class doc header notes on this.
    *
    * Note that that there is no way to `construct()` a native array.  If that is your aim please use
    * `T = std::array<>` or similar.
    *
+   * ### On running out of space in `allocate(sizeof(T) + ...)` ###
+   * The first step in this method is to allocate the outer-layer buffer sized for the new `T` itself along with
+   * some internal book-keeping bytes.  If this fails: the method throws as allocate().
+   *
+   * @see allocate() doc header which describes the relevant throwing semantics.
+   *
+   * ### If `T` constructor throws ###
+   * The thrown exception propagates to our caller upon undoing the `allocate(sizeof(T) + ...)` preceding the
+   * ctor call.
+   *
+   * Corollary + context: A particular sub-case of this is that, while executing `T` ctor, a subordinate --
+   * typically/recommendedly via allocator-furnished container-containing type `T` -- `allocate()` threw `bad_alloc`.
+   * We guarantee that our `allocate(sizeof(T) + ...)` is undone.  In addition: A properly coded (at all nesting-layers)
+   * container-containing type `T`, using (at all nesting-layers) a proper SHM-supporting allocator shall undo all
+   * `allocate()`s that had succeeded up to the one that failed.  This method itself can only take care of its
+   * own `allocate()`, which as just noted it does.
+   *
    * ### Integration with shm::stl::Stateless_allocator ###
    * This method, bracketing the invocation of the `T` ctor, sets the thread-local
    * `shm::stl::Arena_activator<Pool_arena>` context to `this`.  Therefore the caller need not do so.
    * If `T` does not store an STL-compliant structure that uses `Stateless_allocator`, then this is harmless
-   * albeit a small perf hit.  If `T` does do so, then it is a convenience.
+   * albeit a small perf hit (also skipped for all trivially-destructible `T`).  If `T` does do so, then it is a
+   * convenience.
    *
    * Arguably more importantly: The returned `shared_ptr` is such that when garbage-collection of the created
    * data structure does occur -- which may occur in this process, but via lend_object() and borrow_object()
    * may well occur in another process -- the `T::~T()` *dtor* call shall also be bracketed by the aforementioned
-   * context.  Again: If `T` does not rely on `Stateless_allocator`, then it's harmless; but if it *does* then
+   * context.  Again: If `T` does not rely on `Stateless_allocator`, then it's harmless; but if it *does*, then
    * doing this is quite essential.  That is because the user cannot, typically (or at least sufficiently easily),
    * control the per-thread allocator context at the time of dtor call -- simply because who knows who or what
    * will be running when the cross-process ref-count reaches 0.
@@ -669,6 +701,10 @@ public:
    *       - Tip: If also grabbing/printing local_stats(): Suggest identifying arena_stats() and local_stats()
    *         with a disambiguating qualifier like `"arena[]"` and `"local[]"` respectively.  Some fields may
    *         look ~duplicate otherwise and thus confuse people.
+   *
+   * A use-case for the `OPEN_ONLY`/`read_only = true` ctor form: One can monitor arena_stats() through such
+   * a Pool_arena object all while ensuring at the OS-level that it impossible to modify the pool's contents
+   * through it.  So it becomes potentially a pure/safe stats-observer; pretty clean.
    *
    * @see local_stats() which tracks stats relevant to `*this` particular Pool_arena *object*, as opposed to
    *      arena_stats() that tracks events in the in-SHM arena regardless of Pool_arena object.
@@ -877,12 +913,26 @@ private:
   // Methods.
 
   /**
-   * Boring helper of ctors: with the assumption that #m_pool is ready, sets up #m_arena_metadata.  Throws bipc
+   * Helper of ctors: with the assumption that #m_pool is ready, sets up #m_arena_metadata if possible.  Throws bipc
    * exception on failure, re-nullifying #m_pool first.  (As of Boost-1.87 the only conceivable errors are, we feel,
    * failure to lock mutex -- other process crashed while holding it -- or the pool being so tiny as to not
-   * fit #Arena_metadata + internal bipc index stuff.)
+   * fit #Arena_metadata + internal bipc index stuff.  These are not possible if `read_only = true`.)
+   *
+   * If `read_only == true` an extra failure mode is possible: If the metadata has not been added in time to
+   * the underlying SHM-pool, then:
+   *   - does not throw;
+   *   - leaves `m_arena_metadata` null;
+   *   - re-nullifies `m_pool`;
+   *   - leaves any error emission/throwing/whatever to the caller ctor.
+   *
+   * @note That result (no throw, yet `m_pool` and `m_arena_metadata` become/remain null respectively) indicates
+   *       the user did not heed the instruction to create `*this` only after successful creation of pool via
+   *       other ctor elsewhere.
+   *
+   * @param read_only
+   *        True if and only if the invoked ctor was `OPEN_ONLY` with `read_only = true`.
    */
-  void init_arena_metadata();
+  void init_arena_metadata(bool read_only);
 
   /**
    * Identical deleter for #Handle returned by both construct() and borrow_object(); invoked when a given process's
@@ -1016,7 +1066,7 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
   }
   // else
 
-  // No space => throws bad_alloc as advertised.  Nothing else to clean up; let it rip.
+  // No space => throws std::bad_alloc as advertised.  Nothing else to clean up; let it rip.
   const auto handle_state = static_cast<Shm_handle*>(allocate(sizeof(Shm_handle)));
 
   // Buffer acquired but uninitialized.  Construct the owner count to 1 (just us: no lend_object() yet).

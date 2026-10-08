@@ -172,7 +172,8 @@ public:
    * requirements.
    *
    * @param n
-   *        The buffer allocated shall be `n * sizeof(Value)`.  Note: This is a #Value count; not a byte count.
+   *        The buffer allocated shall be sized `n * sizeof(Value)` bytes.
+   *        Note: `n` is a #Value count; not a byte count.
    * @return Locally-dereferenceable pointer to the SHM-allocated buffer.
    *         The buffer is *not* initialized.  E.g., depending on the nature of `T` you may want to placement-ct it
    *         at this address subsequently.
@@ -208,7 +209,12 @@ typename Stateless_allocator<T, Arena>::Pointer Stateless_allocator<T, Arena>::a
    * the SHM-storable fancy-pointer from a locally-dereferenceable raw pointer.  Though typically the fancy-pointer
    * template Arena::Pointer<> would have a ctor that takes a Value*, officially in STL-compliant land it's
    * the static pointer_to() factory.  pointer_traits<>::pointer_to(T&) does that for non-raw
-   * pointers per cppreference.com and also yields a simple &x for raw pointer types (also correct). */
+   * pointers per cppreference.com and also yields a simple &x for raw pointer types (also correct).
+   *
+   * arena->allocate() in particular can throw -- for example Pool_arena::allocate() throws a `bad_alloc` on
+   * running out of pre-configured SHM-pool space.  Propagating it is correct: per cppreference.com
+   *   - Allocator::allocate() "may throw exceptions";
+   *   - there is no specific mandatory exception. */
   return std::pointer_traits<Pointer>::pointer_to
            (*(static_cast<Value*>
                 (arena->allocate(n * sizeof(Value))))); // May throw.

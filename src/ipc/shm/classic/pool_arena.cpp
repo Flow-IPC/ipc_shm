@@ -23,6 +23,7 @@
 #include "ipc/util/process_credentials.hpp"
 #include <flow/error/error.hpp>
 #include <flow/util/stat/stat_set.hpp>
+#include <boost/interprocess/exceptions.hpp>
 #include <new>
 
 namespace ipc::shm::classic
@@ -60,7 +61,7 @@ Pool_arena::Pool_arena(Mode_tag mode_tag, flow::log::Logger* logger_ptr,
     (get_logger(), err_code, error::Code::S_SHM_BIPC_MISC_LIBRARY_ERROR, "Pool_arena(): Pool()", [&]()
   {
     m_pool.emplace(mode_tag, m_pool_name, pool_sz, perms);
-    init_arena_metadata(); // If the above did not throw then do this (it also can throw, re-nullifying m_pool).
+    init_arena_metadata(false); // If the above did not throw then do this (it also can throw, re-nullifying m_pool).
   });
 } // Pool_arena::Pool_arena()
 
@@ -87,6 +88,8 @@ Pool_arena::Pool_arena(flow::log::Logger* logger_ptr,
   m_own_process_id(util::Process_credentials::own_process_id()),
   m_arena_metadata(nullptr)
 {
+  using flow::error::Runtime_error;
+
   FLOW_LOG_INFO("SHM-classic pool [" << *this << "]: Constructing heap handle to heap/pool at name "
                 "[" << m_pool_name << "] in open-only mode; paged read-only? = [" << read_only << "].");
 
@@ -94,29 +97,67 @@ Pool_arena::Pool_arena(flow::log::Logger* logger_ptr,
                                         "Pool_arena(OPEN_ONLY): Pool()", [&]()
   {
     m_pool.emplace(util::OPEN_ONLY, m_pool_name, read_only);
-    init_arena_metadata(); // If the above did not throw then do this (it also can throw, re-nullifying m_pool).
+    init_arena_metadata(true); // If the above did not throw then do this (it also can throw, re-nullifying m_pool).
   });
-} // Pool_arena::Pool_arena()
 
-void Pool_arena::init_arena_metadata()
+  /* It threw?  Fine then.  It didn't, but *err_code is truthy?  We're cooked; get out.
+   * Otherwise: Per init_arena_metadata() doc header, there's an additional failure mode. */
+  if (err_code && *err_code)
+  {
+    return;
+  }
+  // else:
+  if (!m_arena_metadata)
+  {
+    assert((!m_pool) && "init_arena_metadata() is supposed to nullify m_pool in this error case too.");
+
+    const Error_code our_err_code{error::Code::S_SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT};
+    FLOW_LOG_WARNING("SHM-classic pool [" << *this << "]: Improper use of read-only-mode ctor detected; emitting "
+                     "error [" << our_err_code << "] "
+                     "[" << our_err_code.message() << "]."); // This .message() explains the whole thing.
+    if (!err_code)
+    {
+      throw Runtime_error{our_err_code, "Pool_arena::Pool_arena(OPEN_ONLY/read_only)"};
+    }
+    // else
+    *err_code = our_err_code;
+  }
+  // else { All cool. }
+} // Pool_arena::Pool_arena(OPEN_ONLY)
+
+void Pool_arena::init_arena_metadata(bool read_only)
 {
   using ::ipc::bipc::unique_instance;
   using flow::util::stat::print;
 
   /* It'll lock internal mutex, create Arena_metadata{} or find it, unlock, return pointer.  We get our singleton.
-   * We use the throwing form (no std::nothrow), so either it throws, or it returns non-null. */
+   * For f_o_c(): We use the throwing form (no std::nothrow), so either it throws, or it returns non-null.
+   *
+   * find_no_lock() might return .first=null, if the user ignored the directive to ensure the pool had been fully
+   * created/initialized (via a creating ctor form) before cting *this (or if they're using this with some
+   * random pool not being set-up through a proper Pool_arena).  As advertised, it's on the calling ctor to deal
+   * with it. */
   try
   {
-    m_arena_metadata = m_pool->core()->find_or_construct<Arena_metadata>(unique_instance)();
+    if (read_only)
+    {
+      m_arena_metadata = m_pool->core()->find_no_lock<Arena_metadata>(unique_instance).first;
+      // (I want to say find_no_lock() won't throw but -- better safe than sorry; and it's harmless to try{} anyway.)
+    }
+    else
+    {
+      m_arena_metadata = m_pool->core()->find_or_construct<Arena_metadata>(unique_instance)();
+      assert(m_arena_metadata && "That find_or_construct() form is supposed to either return non-null or throw.");
+    }
   }
   catch (...)
   {
     m_pool.reset(); // As promised.
     throw;
   }
-  assert(m_arena_metadata && "That find_or_construct() form is supposed to either return non-null or throw.");
 
-  /* Note: It's tempting to perhaps use ->find_or_construct(std::nothrow) above and lose the try/catch.
+  /* (Assume here !read_only.)
+   * Note: It's tempting to perhaps use ->find_or_construct(std::nothrow) above and lose the try/catch.
    * Check for null; if so then reset m_pool; return.  Or even posit that there is no real way that'd happen,
    * so assert(m_arena_metadata) and return -- end of.
    *
@@ -138,7 +179,7 @@ void Pool_arena::init_arena_metadata()
                 "[free=[" << arena_stat_free_size() << '/' << arena_size() << "]].");
 
   // local_stats() guaranteed zeroed at the moment.
-}
+} // Pool_arena::init_arena_metadata()
 
 Pool_arena::~Pool_arena()
 {
@@ -208,6 +249,9 @@ bool Pool_arena::close_shm_object_handle()
 
 void* Pool_arena::allocate(size_t n)
 {
+  using Bipc_bad_alloc = ::ipc::bipc::bad_alloc;
+  using Std_bad_alloc = std::bad_alloc;
+
   assert((n != 0) && "Please do not allocate(0).");
 
   if (!m_pool)
@@ -216,25 +260,43 @@ void* Pool_arena::allocate(size_t n)
   }
   // else
 
-  const auto logger_ptr = get_logger();
-  if (logger_ptr && logger_ptr->should_log(flow::log::Sev::S_DATA, get_log_component()))
+  void* ret;
+
+  try
   {
-    const auto total = arena_size();
-    const auto prev_free = arena_stat_free_size();
-    const auto ret = m_pool->core()->allocate(n); // Can throw (hence we can throw as advertised).
-    const auto now_free = arena_stat_free_size();
-    assert(total == arena_size());
+    const auto logger_ptr = get_logger();
+    if (logger_ptr && logger_ptr->should_log(flow::log::Sev::S_DATA, get_log_component()))
+    {
+      const auto total = arena_size();
+      const auto prev_free = arena_stat_free_size();
+      ret = m_pool->core()->allocate(n); // Can throw (hence we can throw as advertised).
+      const auto now_free = arena_stat_free_size();
+      assert(total == arena_size());
 
-    FLOW_LOG_DATA_WITHOUT_CHECKING("SHM-classic pool [" << *this << "]: SHM-alloc-ed user buffer sized [" << n << "]; "
-                                   "bipc alloc-algo reports free space changed "
-                                   "[" << prev_free << "] (used [" << (total - prev_free) << "]) => "
-                                   "[" << now_free << "] (used [" << (total - now_free) << "]); "
-                                   "raw delta [" << (prev_free - now_free) << "].");
-    return ret;
+      FLOW_LOG_DATA_WITHOUT_CHECKING("SHM-classic pool [" << *this << "]: SHM-alloc-ed user buffer sized [" << n << "]; "
+                                     "bipc alloc-algo reports free space changed "
+                                     "[" << prev_free << "] (used [" << (total - prev_free) << "]) => "
+                                     "[" << now_free << "] (used [" << (total - now_free) << "]); "
+                                     "raw delta [" << (prev_free - now_free) << "].");
+    }
+    else
+    {
+      ret = m_pool->core()->allocate(n); // Can throw (hence we can throw as advertised).
+    }
   }
-  // else
+  catch (const Bipc_bad_alloc&) // As advertised normalize alloc failure to std::bad_alloc.
+  {
+    /* No WARNING; we're intentionally quiet as a low-level-feeling API.  User can themselves log as desired.
+     * Who knows -- maybe their algorithm is intentionally OK with exceeding (configured-by-them, limited) space.
+     * We don't want to spam in such situations. */
+    FLOW_LOG_TRACE("SHM-classic pool [" << *this << "]: SHM-alloc-ed user buffer sized [" << n << "]; but "
+                   "bipc alloc-algo threw bipc::bad_alloc (no space left in SHM-pool); throwing as "
+                   "std::bad_alloc.  At this moment: free space [" << arena_stat_free_size() << "] "
+                   "of [" << arena_size() << "].");
+    throw Std_bad_alloc{};
+  }
 
-  return m_pool->core()->allocate(n); // Can throw (hence we can throw as advertised). XXXpossibly catch bipc bad_cast, rethrow as std:: (requires decision first, see earlier XXX)
+  return ret;
 } // Pool_arena::allocate()
 
 bool Pool_arena::deallocate(void* buf_not_null) noexcept

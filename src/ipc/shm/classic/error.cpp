@@ -102,6 +102,12 @@ std::string Category::message(int val) const // Virtual.
   case Code::S_SHM_BIPC_MISC_LIBRARY_ERROR:
     return "Low-level boost.ipc.shm: boost.interprocess emitted miscellaneous library exception sans a system code; "
            "a WARNING message at throw-time should contain all possible details.";
+  case Code::S_SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT:
+    return "SHM-classic pool/arena, requested to be opened in native read-only mode, was found by name, but "
+           "internal setup had not yeen been completed at that time; therefore the pool-open operation has failed.  "
+           "Please follow the contract which mandates the pre-condition that the pool-create operation had been "
+           "completed before the read-only pool-open attempt.  Further pool-open attempts without following this "
+           "policy can cause undefined behavior.";
 
   case Code::S_END_SENTINEL:
     assert(false && "SENTINEL: Not an error.  "
@@ -119,6 +125,8 @@ util::String_view Category::code_symbol(Code code) // Static.
   {
   case Code::S_SHM_BIPC_MISC_LIBRARY_ERROR:
     return "SHM_BIPC_MISC_LIBRARY_ERROR";
+  case Code::S_SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT:
+    return "SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT";
 
   case Code::S_END_SENTINEL:
     return "END_SENTINEL";
