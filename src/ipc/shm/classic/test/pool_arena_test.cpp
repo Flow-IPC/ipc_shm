@@ -44,10 +44,8 @@ using util::Shared_name;
 using ipc::test::page_sz;
 using ipc::test::shm_pool_committed_sz;
 
-/* Always-on console logger for test-progress output (FLOW_LOG_INFO etc.).
- * Survives across all TESTs in this TU; object internals use `g_logger` (toggleable) instead. */
+// Logger for Flow-IPC objects' internals (toggleable below); survives across all TESTs in this TU.
 ipc::test::Test_logger g_logger_obj;
-Logger* const g_logger_console = &g_logger_obj;
 #if 1
 Logger* const g_logger = nullptr; // Normal: Flow-IPC objects silent.
 #else

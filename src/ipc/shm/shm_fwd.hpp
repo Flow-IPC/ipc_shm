@@ -149,7 +149,7 @@
  *
  * ### STL support ###
  * The other major sub-module, as mentioned, is agnostic to the specific SHM-provider.  It allows one to store
- * complex native C++ data directly in SHM.  Namely, arbitrary combinations of STL-compliant containers, `struct`s,
+ * complex native C++ data directly in SHM: namely, arbitrary combinations of STL-compliant containers, `struct`s,
  * fixed-length arrays, and scalars.  (Even pointers can be stored; one only needs to use `Arena::Pointer<T>`
  * in lieu of `T*`.)  Both SHM-providers above (shm::classic and shm::arena_lend::jemalloc) provide the semantics
  * required to correctly plug-in to this system.  See doc header for namespace shm::stl to continue exploring
