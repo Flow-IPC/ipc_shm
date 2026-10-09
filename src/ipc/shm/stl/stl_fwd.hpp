@@ -23,15 +23,15 @@
  * and SHared Memory (SHM) providers.
  *
  * @note This sub-module/namespace is not limited to working with the jemalloc-based SHM
- * provider supplied elsewhere in ipc::shm; it can and does work with any other SHM provider
- * capable allocating an uninitialized buffer in SHM and later manually deallocating it by raw pointer.
- * In fact, due to its simplicity of setup, the SHM-classic (a/k/a boost.interprocess) SHM provider
- * (in ipc::shm::classic) may be used in comments as the go-to example.
+ *       provider supplied elsewhere in ipc::shm; it can and does work with any other SHM-provider
+ *       capable of allocating an uninitialized buffer in SHM and later manually deallocating it by raw pointer.
+ *       In fact, due to its simplicity of setup, the SHM-classic (a/k/a boost.interprocess) SHM-provider
+ *       (in ipc::shm::classic) may be used in comments as the go-to example.
  *
  * ### Background ###
  * What's this trying to do?  Answer: It's quite a narrow purpose in fact, and it's important to separate it
  * from orthogonal concerns to avoid confusion.  So let's slowly explain step by step.  Suppose we define as
- * a bare-bones SHM provider via an `Arena` concept, where `Arena` is a class -- instantiated in some unspecified
+ * a bare-bones SHM-provider via an `Arena` concept, where `Arena` is a class -- instantiated in some unspecified
  * way -- with at least these key methods:
  *
  *   ~~~
@@ -45,7 +45,7 @@
  *     // null.
  *     void* allocate(size_t n);
  *
- *     // Undo allocate() that returned `p`; or the equivalent operation if the SHM provider allows
+ *     // Undo allocate() that returned `p`; or the equivalent operation if the SHM-provider allows
  *     // process 2 to deallocate something that was allocated by process 1 (and `p` indeed was allocated
  *     // in a different process but transmitted to the current process; and was properly made
  *     // locally-dereferenceable).
@@ -54,8 +54,8 @@
  *   ~~~
  *
  * Suppose you have a plain-old-datatype (POD) type `T`; like an `int` or a `struct` with a bunch of scalars
- * or arrays of scalars or various combos like that.  To create an `T` in SHM, one could just call
- * `Arena::allocate(sizeof(S))` and load it up with values based off the returned pointer, having
+ * or arrays of scalars or various combos like that.  To create a `T` in SHM, one could just call
+ * `Arena::allocate(sizeof(T))` and load it up with values based off the returned pointer, having
  * cast it to `T*`.  (Or one could use placement-construction but never mind.)  To destroy it, one
  * would `Arena::deallocate()` passing-in the returned pointer from `allocate()`.  To transmit to
  * another process, one would need to somehow send over a representation of `T* p`, then make it
@@ -70,7 +70,7 @@
  *   {
  *   private:
  *     // Currently allocated buffer starts at m_buf, is `m_buf_sz * sizeof(E)` long; and the used
- *     // range (within [0, size()) starts at m_buf also but is only m_elem_ct (<= m_buf_sz) `E`s long.
+ *     // range (within [0, size())) starts at m_buf also but is only m_elem_ct (<= m_buf_sz) `E`s long.
  *     E* m_buf; size_t m_buf_sz; size_t m_elem_ct;
  *   }
  *   using T = Vector<int>;
@@ -84,7 +84,7 @@
  * one.  One would have to somehow translate it and change `m_buf` to make it locally-dereferenceable; but then
  * it would become wrong in the original process: remember that the idea is to place the `T` *itself* into SHM
  * in the first place.  One could write internal `Vector` code that would do the translation -- essentially be
- * SHM-aware -- but that's terribly onerous a requirement for a container.
+ * specifically SHM-aware -- but that's terribly onerous a requirement for a container.
  *
  * The good news is the STL containers, at least per standard and at least the `boost::container` impls of them,
  * use a technique called *allocators* that resolves this problem (among others).  So now consider `vector<E>`,
@@ -99,7 +99,7 @@
  *     Allocator m_alloc; // Usually initialized via default-ct `Allocator()` at ctor time.
  *
  *     // Currently allocated buffer starts at m_buf, is `m_buf_sz * sizeof(E)` long; and the used
- *     // range (within [0, size()) starts at m_buf also but is only m_elem_ct (<= m_buf_sz) `E`s long.
+ *     // range (within [0, size())) starts at m_buf also but is only m_elem_ct (<= m_buf_sz) `E`s long.
  *     Allocator::pointer m_buf; size_t m_buf_sz; size_t m_elem_ct;
  *   }
  *   using T = Vector<int>;
@@ -107,14 +107,15 @@
  *
  * Firstly note the type of `m_buf`: it uses not a raw pointer but an allocator-type-driven type which must
  * have certain pointer-like semantics.  In `std::allocator`, it *is* simply the raw pointer `E*` after all;
- * but for SHM we need to provide something else.  Secondly, when it needs to allocate `m_buf`, it no longer
- * does `new`.  Instead it does basically `m_buf = m_alloc.allocate(sizeof(E) * m_buf_sz)`.  And when deleting
- * instead of `delete` it does `m_alloc.deallocate(p)`.
+ * but for SHM we need to provide something else.  Secondly when it needs to allocate `m_buf`, it no longer
+ * does `new`.  Instead it does basically `m_buf = m_alloc.allocate(m_buf_sz)`.  Conversely when deleting
+ * instead of `delete` it does `m_alloc.deallocate(m_buf, m_buf_sz)`.
  *
- * So via the allocator's (1) alloc/dealloc methods and (2) its mandated pointer type, the allocation strategy
- * *and* pointer storage can be parameterized.  As for `m_alloc` itself, it is often (usually) an empty object
- * (`sizeof(Allocator) == 0`); that's a *stateless* allocator; and it is always default-cted.  It can also be
- * stateful (in which case it must be explicitly constructed).  In real `vector` you'll see support for both.
+ * So via the allocator's (1) alloc/dealloc methods and (2) its mandated pointer type, the allocation strategy *and*
+ * pointer storage can be parameterized.  As for `m_alloc` itself, it is often (usually) an empty object
+ * (`is_empty_v<Allocator> == true`; with the empty-base optimization it takes no space in the container); that's
+ * a *stateless* allocator; and it is always default-cted.  It can also be stateful (in which case it must be
+ * explicitly constructed).  In real `vector` you'll see support for both.
  *
  * How does this help our SHM use case?  Firstly, of course, `allocate()` and `deallocate()` can be written to
  * allocate/deallocate via `Arena::[de]allocate()`.  Secondly, the `pointer` type can be something
@@ -131,7 +132,7 @@
  *
  * If `T` needs to allocate more objects that do yet more allocation on its behalf, then it would remember to
  * propagate the `Allocator` to those, indefinitely.  These *inside* allocations/deallocations/dereferencing
- * all happen via `Allocator`.  One must only only worry about invoking the ctor or dtor of `T` within the
+ * all happen via `Allocator`.  One must only worry about invoking the ctor or dtor of `T` within the
  * process that is indeed allowed to allocate/deallocate.  (So if `Arena` does support deallocation in
  * not-the-original-allocating process, then the dtor could be called in any process working with the *outside* `T`.
  * If not, then not.)
@@ -139,24 +140,27 @@
  * ### The task ###
  * So that's the background.  The main product of this namespace ipc::shm::stl is SHM-aware allocator types that
  * can be used as template params to STL-compliant containers (and other types at times) in order to be able
- * to allocate nested containers-of-containers...-of-PODs directly in SHM in such a way as to be accessible
- * in multiple processes, as long as the *outside* `T*` is properly trasmitted from process to process by the user.
+ * to allocate nested containers-of-containers...-of-PODs-of-... directly in SHM in such a way as to be accessible
+ * in multiple processes, as long as the *outside* `T*` is properly transmitted from process to process by the user.
  * Only the *outside* SHM handle to the container-of-... is something the user worries about; the rest "just works,"
  * as long as all containers involved are properly parameterized to use the SHM-aware allocator types we provide.
  *
  * The main product, then, is Stateless_allocator.  See its doc header.  The short version for your convenience:
  *   - Stateless_allocator is itself parameterized on `Arena`, which must be a SHM-allocating type like the one used
- *     above.  `Arena` must supply: `allocate()`, `deallocate()`, and `Pointer`.  The `Pointer` must
+ *     above.  `Arena` must(^) supply: `allocate()`, `deallocate()`, and `Pointer`.  The `Pointer` must
  *     be a *fancy pointer* type that can produce a locally-dereferenceable `void*` and has data member(s)
  *     that contain bits that are process-agnostic (such as an offset, or pool ID and offset, and so on) when
  *     stored in SHM.
  *     - In particular, classic::Pool_arena complies with these requirements.  Its allocate/deallocate work within 1
  *       SHM pool per Arena.  Its `Pointer` is internally `bipc::offset_ptr`.
+ *     - (^) There is, for SHM-arena-lending providers (e.g.: SHM-jemalloc, centered on
+ *       arena_lend::jemalloc::Ipc_arena), a key case where `Arena` must merely supply `Pointer`, not allocate() or
+ *       deallocate().  See "Use in read-only borrowing mode" in Stateless_allocator doc header.
  *   - Stateless_allocator is stateless.  It is always default-cted, so all the user must do is remember to
  *     provide Stateless_allocator as the allocator template param(s) to the container type(s) involved.
- *     Therefore it must know which `Arena` it shall operate on.  This is controlled on a thread-local basis
- *     via RAII-style helper `Arena_activator`.  (So the user must use `Arena_activator ctx(Arena*)` to
- *     activate the "current" Arena for the purposes of Stateless_allocator use, before any work with
+ *     Therefore it must know on which `Arena` it shall operate.  This is controlled on a thread-local basis
+ *     via RAII-style helper `Arena_activator`.  (So the user must use `Arena_activator ctx{Arena*}` to
+ *     activate the "current" `Arena` for the purposes of Stateless_allocator use, before any work with
  *     the STL-compliant container types involved in a given SHM-stored data structure.)
  *
  * As of this writing we just provide Stateless_allocator.  `Stateful_allocator` may also be provided depending
@@ -171,22 +175,22 @@ namespace ipc::shm::stl
 
 // Find doc headers near the bodies of these compound types.
 
-template<typename T, typename Arena>
+template<typename T, typename Arena_t>
 class Stateless_allocator;
 
-template<typename Arena>
+template<typename Arena_t>
 class Arena_activator;
 
 // Free functions.
 
 /**
- * Returns `true` for any 2 `Stateless_allocator`s managing the same Stateless_allocator::Arena_obj.
+ * Returns `true` for any 2 `Stateless_allocator`s managing the same Stateless_allocator::Arena.
  * This satisfies formal requirements of STL-compliant `Allocator` concept.  See cppreference.com for those formal
  * requirements.  Since it's a stateless allocator, this always returns `true`.
  *
  * @relatesalso Stateless_allocator
  *
- * @tparam Arena
+ * @tparam Arena_t
  *         See Stateless_allocator.
  * @tparam T1
  *         See Stateless_allocator.
@@ -196,19 +200,19 @@ class Arena_activator;
  *        An allocator.
  * @param val2
  *        An allocator.
- * @return See above.
+ * @return `true`.
  */
-template<typename Arena, typename T1, typename T2>
-bool operator==(const Stateless_allocator<T1, Arena>& val1, const Stateless_allocator<T2, Arena>& val2);
+template<typename Arena_t, typename T1, typename T2>
+bool operator==(const Stateless_allocator<T1, Arena_t>& val1, const Stateless_allocator<T2, Arena_t>& val2);
 
 /**
- * Returns `false` for any 2 `Stateless_allocator`s managing the same Stateless_allocator::Arena_obj.
+ * Returns `false` for any 2 `Stateless_allocator`s managing the same Stateless_allocator::Arena.
  * This satisfies formal requirements of STL-compliant `Allocator` concept.  See cppreference.com for those formal
  * requirements.  Since it's a stateless allocator, this always returns `false`.
  *
  * @relatesalso Stateless_allocator
  *
- * @tparam Arena
+ * @tparam Arena_t
  *         See Stateless_allocator.
  * @tparam T1
  *         See Stateless_allocator.
@@ -218,9 +222,9 @@ bool operator==(const Stateless_allocator<T1, Arena>& val1, const Stateless_allo
  *        An allocator.
  * @param val2
  *        An allocator.
- * @return See above.
+ * @return `false`.
  */
-template<typename Arena, typename T1, typename T2>
-bool operator!=(const Stateless_allocator<T1, Arena>& val1, const Stateless_allocator<T2, Arena>& val2);
+template<typename Arena_t, typename T1, typename T2>
+bool operator!=(const Stateless_allocator<T1, Arena_t>& val1, const Stateless_allocator<T2, Arena_t>& val2);
 
 } // namespace ipc::shm::stl

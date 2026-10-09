@@ -18,6 +18,7 @@
 /// @file
 #include "ipc/shm/classic/error.hpp"
 #include "ipc/util/util_fwd.hpp"
+#include <flow/util/util.hpp>
 
 namespace ipc::shm::classic::error
 {
@@ -25,7 +26,7 @@ namespace ipc::shm::classic::error
 // Types.
 
 /**
- * The boost.system category for errors returned by the ipc::shm module.  Analogous to
+ * The boost.system category for errors returned by the ipc::shm::classic module.  Analogous to
  * transport::error::Category.  All notes therein apply.
  */
 class Category :
@@ -87,7 +88,7 @@ Category::Category() = default;
 
 const char* Category::name() const noexcept // Virtual.
 {
-  return "ipc/shm";
+  return "ipc/shm/classic";
 }
 
 std::string Category::message(int val) const // Virtual.
@@ -103,11 +104,10 @@ std::string Category::message(int val) const // Virtual.
     return "Low-level boost.ipc.shm: boost.interprocess emitted miscellaneous library exception sans a system code; "
            "a WARNING message at throw-time should contain all possible details.";
   case Code::S_SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT:
-    return "SHM-classic pool/arena, requested to be opened in native read-only mode, was found by name, but "
-           "internal setup had not yeen been completed at that time; therefore the pool-open operation has failed.  "
-           "Please follow the contract which mandates the pre-condition that the pool-create operation had been "
-           "completed before the read-only pool-open attempt.  Further pool-open attempts without following this "
-           "policy can cause undefined behavior.";
+    return "SHM-classic pool/arena, requested to be opened in native read-only mode, was found by name, but its "
+           "internal setup had not been completed (e.g., the creating op was still in progress); so the pool-open "
+           "failed.  The contract requires completing the pool-create op before a read-only pool-open.  Violating "
+           "it can instead cause undefined behavior: this error means only that a violation was detected this time.";
 
   case Code::S_END_SENTINEL:
     assert(false && "SENTINEL: Not an error.  "

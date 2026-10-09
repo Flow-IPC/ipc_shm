@@ -62,7 +62,7 @@ public:
    * Its main relevant things are: `construct<T>` (returns `shared_ptr<T>`, garbage-collected including cross-process);
    * and integration with STL-compliant ipc::shm::stl allocator(s).
    *
-   * In this SHM provider, this #Arena object is also the "session" object; meaning it is the per-session
+   * In this SHM-provider, this #Arena object is also the "session" object; meaning it is the per-session
    * thingie capable of `lend_object()` (prepare to transmit to opposing conversant) and `borrow_object()` (accept
    * the same).
    */

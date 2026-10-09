@@ -363,7 +363,7 @@ public:
    *        mapped by `*this` subsequently.  Such attempts will lead to undefined behavior (Linux: segmentation fault).
    *        Note that this includes any attempt at allocating as well as writing into allocated (or otherwise)
    *        address space.  Further note that, internally, deallocation -- directly or otherwise -- involves
-   *        (in this implementation) writing and is thus also disallowed.  Lastly, and quite significantly,
+   *        (in this implementation) writing and is thus also disallowed.  Moreover, and quite significantly,
    *        borrow_object() cannot be called.  Therefore it is up to you, in that
    *        case, to (1) never call deallocate() directly or otherwise (i.e., through an allocator);
    *        and (2) to design your algorithms in such a way as to never require lending to this Pool_arena.
@@ -481,8 +481,9 @@ public:
   bool close_shm_object_handle();
 
   /**
-   * Allocates buffer of specified size, in bytes, in the accessed pool; returns locally-derefernceable address
-   * to the first byte.  Returns null if and only if no pool attached to `*this`.
+   * Allocates buffer of specified size, in bytes, in the accessed pool; returns locally-dereferenceable address
+   * to the first byte.  Returns null if and only if no pool attached to `*this`.  Throws on any other
+   * error (details below).
    *
    * Take care to only use this when and as appropriate; see class doc header notes on this.
    *
@@ -497,6 +498,10 @@ public:
    * behaving consistently with letting an allocator's `allocate()` simply forward to this method (of some `*this`)
    * and let it throw.  Assuming one operates on an active `*this` (that did not fail construction), there is no
    * need to check for null return.
+   *
+   * ### Other errors ###
+   * They throw exceptions.  All are out of the mainstream.  (One we know of as of this writing is
+   * a bipc `lock_exception`, probably if a process crashed while holding the in-SHM-pool lock.)
    *
    * @param n
    *        Desired buffer size in bytes.  Must not be 0 (behavior undefined/assertion may trip).
@@ -528,7 +533,7 @@ public:
    * Note that that there is no way to `construct()` a native array.  If that is your aim please use
    * `T = std::array<>` or similar.
    *
-   * ### On running out of space in `allocate(sizeof(T) + ...)` ###
+   * ### On running out of space (or otherwise failing) in `allocate(sizeof(T) + ...)` ###
    * The first step in this method is to allocate the outer-layer buffer sized for the new `T` itself along with
    * some internal book-keeping bytes.  If this fails: the method throws as allocate().
    *
@@ -539,7 +544,7 @@ public:
    * ctor call.
    *
    * Corollary + context: A particular sub-case of this is that, while executing `T` ctor, a subordinate --
-   * typically/recommendedly via allocator-furnished container-containing type `T` -- `allocate()` threw `bad_alloc`.
+   * typically/recommendedly via allocator-furnished container-containing type `T` -- `allocate()` threw.
    * We guarantee that our `allocate(sizeof(T) + ...)` is undone.  In addition: A properly coded (at all nesting-layers)
    * container-containing type `T`, using (at all nesting-layers) a proper SHM-supporting allocator shall undo all
    * `allocate()`s that had succeeded up to the one that failed.  This method itself can only take care of its
@@ -703,7 +708,7 @@ public:
    *         look ~duplicate otherwise and thus confuse people.
    *
    * A use-case for the `OPEN_ONLY`/`read_only = true` ctor form: One can monitor arena_stats() through such
-   * a Pool_arena object all while ensuring at the OS-level that it impossible to modify the pool's contents
+   * a Pool_arena object all while ensuring at the OS-level that it is impossible to modify the pool's contents
    * through it.  So it becomes potentially a pure/safe stats-observer; pretty clean.
    *
    * @see local_stats() which tracks stats relevant to `*this` particular Pool_arena *object*, as opposed to
@@ -1066,7 +1071,7 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
   }
   // else
 
-  // No space => throws std::bad_alloc as advertised.  Nothing else to clean up; let it rip.
+  // No space => throws std::bad_alloc (or other problem=>exception) as promised.  Nothing to clean; let it rip.
   const auto handle_state = static_cast<Shm_handle*>(allocate(sizeof(Shm_handle)));
 
   // Buffer acquired but uninitialized.  Construct the owner count to 1 (just us: no lend_object() yet).

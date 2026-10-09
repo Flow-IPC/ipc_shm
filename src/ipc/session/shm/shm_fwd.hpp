@@ -21,7 +21,7 @@
 /**
  * ipc::session sub-namespace that groups together facilities for SHM-backed sessions, particularly augmenting
  * #Client_session, #Server_session, and Session_server classes by providing SHM-backed zero-copy functionality.
- * ipc::session::shm is itself empty or almost empty; but for each possible SHM provider there is a further
+ * ipc::session::shm is itself empty or almost empty; but for each possible SHM-provider there is a further
  * sub-namespace; for example ipc::session::shm::classic.
  *
  * ### Background ###
@@ -107,7 +107,7 @@
  *     - This enables manually-constructing structures and transmitting them from one session participant to the
  *       other.
  *     - On the borrower side one should define `T` in terms of `"Session::Borrower_allocator"` instead of
- *       `"Session::Allocator"`.  (With SHM-classic they are the same type; but with arena-lending SHM providers,
+ *       `"Session::Allocator"`.  (With SHM-classic they are the same type; but with arena-lending SHM-providers,
  *       SHM-jemalloc at the moment, they are not.)
  *   - Suppose you have opened a channel C between your two peer objects.  Suppose you upgrade it to a
  *     transport::struc::Channel.  Without SHM, your only out-of-the-box choice for out-message serialization

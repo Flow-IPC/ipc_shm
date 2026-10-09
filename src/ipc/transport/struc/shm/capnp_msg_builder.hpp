@@ -38,11 +38,11 @@ namespace ipc::transport::struc::shm
 
 /**
  * A `capnp::MessageBuilder` used by shm::Builder and for general capnp users: similar to a `MallocMessageBuilder`
- * with the `GROW_HEURISTICALLY` alloc-strategy but allocating via a SHM provider (of template-arg-specific
+ * with the `GROW_HEURISTICALLY` alloc-strategy but allocating via a SHM-provider (of template-arg-specific
  * type) in SHM instead of the heap via `malloc()`.
  *
  * It can be used as a #Capnp_msg_builder_interface (`capnp::MessageBuilder`) independently of the rest of
- * ipc::transport::struc or even ::ipc (excepting the SHM provider supplied as template arg `Shm_arena`).
+ * ipc::transport::struc or even ::ipc (excepting the SHM-provider supplied as template arg `Shm_arena`).
  * For example our optional capnp-RPC integration in sub-namespace shm::rpc uses shm::Capnp_message_builder
  * and Capnp_message_reader in key ways.
  *
@@ -273,7 +273,7 @@ private:
  * structure previously created by Capnp_message_builder (a `MessageBuilder` impl).
  *
  * It can be used as a #Capnp_msg_reader_interface (`capnp::MessageReader`) independently of the rest of
- * ipc::transport::struc or even ::ipc (excepting the SHM provider supplied as template arg `Shm_arena`).
+ * ipc::transport::struc or even ::ipc (excepting the SHM-provider supplied as template arg `Shm_arena`).
  *
  * @tparam Shm_arena
  *         See Capnp_message_reader.

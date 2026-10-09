@@ -97,7 +97,8 @@ Pool_arena::Pool_arena(flow::log::Logger* logger_ptr,
                                         "Pool_arena(OPEN_ONLY): Pool()", [&]()
   {
     m_pool.emplace(util::OPEN_ONLY, m_pool_name, read_only);
-    init_arena_metadata(true); // If the above did not throw then do this (it also can throw, re-nullifying m_pool).
+    // If the above did not throw then do this (it also can throw, re-nullifying m_pool).
+    init_arena_metadata(read_only);
   });
 
   /* It threw?  Fine then.  It didn't, but *err_code is truthy?  We're cooked; get out.
@@ -143,6 +144,11 @@ void Pool_arena::init_arena_metadata(bool read_only)
     {
       m_arena_metadata = m_pool->core()->find_no_lock<Arena_metadata>(unique_instance).first;
       // (I want to say find_no_lock() won't throw but -- better safe than sorry; and it's harmless to try{} anyway.)
+
+      if (!m_arena_metadata)
+      {
+        m_pool.reset(); // As promised.
+      }
     }
     else
     {
@@ -173,10 +179,13 @@ void Pool_arena::init_arena_metadata(bool read_only)
    * case there's indeed a problem, they'll at least have an Error_code and/or exception + possible log message
    * (from our likely caller, the ctor) to help figure it out. */
 
-  FLOW_LOG_INFO("SHM-classic pool [" << *this << "]: Stats at ctor (arena[] can change concurrently if pool "
-                "just-opened; ~zeroed if pool just-created): "
-                "arena[" << print(*(arena_stats())) << "]"
-                "[free=[" << arena_stat_free_size() << '/' << arena_size() << "]].");
+  if (m_arena_metadata)
+  {
+    FLOW_LOG_INFO("SHM-classic pool [" << *this << "]: Stats at ctor (arena[] can change concurrently if pool "
+                  "just-opened; ~zeroed if pool just-created): "
+                  "arena[" << print(*(arena_stats())) << "]"
+                  "[free=[" << arena_stat_free_size() << '/' << arena_size() << "]].");
+  }
 
   // local_stats() guaranteed zeroed at the moment.
 } // Pool_arena::init_arena_metadata()

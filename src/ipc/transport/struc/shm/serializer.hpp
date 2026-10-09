@@ -52,7 +52,7 @@ public:
 
 /**
  * Implements Struct_builder concept with maximal zero-copy perf by (1) storing the actual user-schema-controlled
- * message using the SHM provider of choice, in SHM, and (2) straightforwardly allocating 1 segment in regular heap
+ * message using the SHM-provider of choice, in SHM, and (2) straightforwardly allocating 1 segment in regular heap
  * and placing the SHM handle there for transmission over IPC.  That is, each mutation via payload_msg_builder()
  * may, as needed, trigger a SHM allocation.  In this algorithm, somewhat similarly to Heap_fixed_builder, the size of
  * each (SHM-)allocated segment will be determined intelligently based on an exponential-growth algorithm,
@@ -63,21 +63,21 @@ public:
  * to "outer/inner" serialization; we should consistently use the latter terminology there and all over Flow-IPC.
  *
  * ### Failure mode; reasonable uses ###
- * As long as the SHM provider is able to dole out RAM,
+ * As long as the SHM-provider is able to dole out RAM,
  * there is no limit at all on the size/complexity of what one mutates over payload_msg_builder().  In fact `*this`
  * provides the 2-layer approach explained in the concept Struct_builder doc header.
  *
  * There are two realistic failure modes in `*this`.  The first is the following:
  *   -# User attempts to mutate via payload_msg_builder().
  *   -# capnp internals recognize the current segment is used up and asks for a new segment of at least N bytes.
- *   -# `*this` asks the SHM provider (see template param docs below) to allocate >=N bytes.
- *   -# The SHM provider determines it has run out of space according to its policies/algorithm/limitations and
+ *   -# `*this` asks the SHM-provider (see template param docs below) to allocate >=N bytes.
+ *   -# The SHM-provider determines it has run out of space according to its policies/algorithm/limitations and
  *      throws exception, in spirit similar to `std::bad_alloc`.
  *   -# This propagates to the user via their payload_msg_builder() mutation statement: it throws.
  *
  * The key here: This cannot be detected via `*this`.  In spirit it is similar to `Heap_fixed_builder`-originated
  * mutations by the user running out of regular-heap (even virtual disk heap, if enabled) and is outside our scope
- * to control.  The only remedy: choose a SHM provider that does not run out of space beyond simply running out of
+ * to control.  The only remedy: choose a SHM-provider that does not run out of space beyond simply running out of
  * RAM; e.g., by mapping more SHM pools, or whatever.  Otherwise, all the user can do is catch the `bad_alloc`-like
  * exception around their mutations on payload_msg_builder() and take whatever contingency steps.
  *
@@ -89,13 +89,13 @@ public:
  * @see Struct_builder: implemented concept.
  *
  * @tparam Shm_arena
- *         SHM provider type with the ability to allocate STL-compliant data structures directly in SHM, returning
+ *         SHM-provider type with the ability to allocate STL-compliant data structures directly in SHM, returning
  *         a `shared_ptr` outer-SHM-handle that is possible to `lend_object()`/`borrow_object()` via
  *         shm::Builder::Session.
  *         `Shm_arena::Handle<T>` must equal `shared_ptr<T>` (meaning type with standard `shared_ptr<T>` semantics;
  *         in practice probably either `std::shared_ptr<T>` or `boost::shared_ptr<T>`).
  *         It must provide a `construct<T>()` method as exemplified by shm::classic::Pool_arena::construct().
- *         (This is an *example*; you do not have to use `Pool_arena` and indeed should choose a SHM provider
+ *         (This is an *example*; you do not have to use `Pool_arena` and indeed should choose a SHM-provider
  *         suitable to your needs, especially as regards to being able to allocate sufficiently large segments.)
  *         That is: `Handle<T> construct<T>(...ctor_args...)`, such that if it returned `p` then
  *         `session::shm::Arena_to_shm_session_t<Shm_arena>` pointee has method
@@ -140,7 +140,7 @@ public:
    * is as of this writing: #m_segment_sz_init which indicates the size of the initial capnp-segment in
    * SHM (where user-specified capnp-data are serialized); and #m_arena.  Explanation of that one:
    * `Builder` ctor configured by `Config` creates builder that shall SHM-allocate segments of internally determined
-   * sizes subsequently.  The SHM provider is to be supplied to this ctor via #m_arena arg;
+   * sizes subsequently.  The SHM-provider is to be supplied to this ctor via #m_arena arg;
    * see class doc header for requirements and background.  (The simplest available setup would
    * let #Arena = ipc::shm::classic::Pool_arena; with #m_arena = some pre-opened `Pool_arena`.)
    *
@@ -251,7 +251,7 @@ public:
 
   /**
    * Implements concept API.  Please see "Failure mode" discussion in our class doc header which notes that
-   * any mutation of what payload_msg_builder() returns may throw a bad-alloc exception, if the SHM provider cannot
+   * any mutation of what payload_msg_builder() returns may throw a bad-alloc exception, if the SHM-provider cannot
    * satisfy a capnp-required segment-allocation request.
    *
    * @return See above.
@@ -418,7 +418,7 @@ public:
   /**
    * Implements concept API.  In this impl: acts essentially identically to shm::Builder::~Builder() dtor:
    * decrements the owner-process ref-count by 1; if that made it go from 1 to 0 then the underlying
-   * SHM-allocated segments are deallocated (possibly asynchronously depending on the SHM provider's behavior);
+   * SHM-allocated segments are deallocated (possibly asynchronously depending on the SHM-provider's behavior);
    * but if it went from 2 to 1 then not (shm::Builder dtor is yet to run).  If there are other `Reader`s
    * in the picture, the ref-count may have grown beyond 2.
    */
@@ -592,7 +592,7 @@ void Builder<Shm_arena>::emit_serialization(Segment_bufs* target_blobs, util::Bl
    *     - So assert no error was emitted.
    *
    * If this is emit_serialization() #2, #3, ...: This value will always be the same, since it's just the SHM handle's
-   * encoding; at least for the 2 SHM providers (SHM-classic, SHM-jemalloc) that's the case, and I (ygoldfel) can't
+   * encoding; at least for the 2 SHM-providers (SHM-classic, SHM-jemalloc) that's the case, and I (ygoldfel) can't
    * conceive of anything different.  @todo Considering simply no-op-ing here for any emit_serialization()s except the
    * first one.  It's not urgent, probably, as despite looking fancy, in this case the insides of the following call
    * will barely do any work. */

@@ -237,7 +237,7 @@ using Core_serializer_global_stats
  * `*target_info_dump` which can then be read/printed/aggregated at leisure.  That is (see Serializer_info_dump):
  * the pure-heap, SHM-msg-outer, and SHM-msg-core global serializer stat-sets (3 singletons).
  *
- * If your application uses two SHM providers (unusual), call this once per `Arena` type; note the
+ * If your application uses two SHM-providers (unusual), call this once per `Arena` type; note the
  * `m_heap` part shall be redundant between the two results.
  *
  * (This does not affect any serializer object that has been redirected -- via the relevant builder/reader config

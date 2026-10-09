@@ -40,7 +40,7 @@ in descending order of mass appeal, by our estimation.
       One tries to keep it to the capnp-backed schema-based messages of `ipc::transport::struc`; but
       sometimes that's not sufficient, and one will want to "go native with it."
   - At the lowest level, direct access to SHM in a classic way is provided as well.  (Internally this backs
-    the higher-level SHM-enabled features above.)  This is called the **SHM-classic SHM provider**.
+    the higher-level SHM-enabled features above.)  This is called the **SHM-classic SHM-provider**.
     Typically one need not worry about it, other than specifying that this is SHM-provider one would like
     to use for their entire session.  However, if desired, the SHM-classic pools can be set up and accessed
     directly.  In that sense it is akin to boost.interprocess's delightful SHM support.

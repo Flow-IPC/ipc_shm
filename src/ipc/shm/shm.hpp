@@ -18,6 +18,8 @@
 /// @file
 #pragma once
 
+#include "ipc/shm/shm_fwd.hpp"
+
 // (See shm_fwd.hpp for doc header for this namespace.)
 namespace ipc::shm
 {
@@ -26,8 +28,8 @@ namespace ipc::shm
 
 /**
  * Implementation of #Arena_to_borrower_allocator_arena_t.  See specializations which actually contain the mapping for
- * specific `Arena` types; for example: `Arena_to_shm_session<classic::Pool_arena>`,
- * `Arena_to_shm_session<arena_lend::jemalloc::Ipc_arena>`.
+ * specific `Arena` types; for example: `Arena_to_borrower_allocator_arena<classic::Pool_arena>`,
+ * `Arena_to_borrower_allocator_arena<arena_lend::jemalloc::Ipc_arena>`.
  */
 template<typename Arena>
 struct Arena_to_borrower_allocator_arena

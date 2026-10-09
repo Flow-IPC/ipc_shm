@@ -38,12 +38,11 @@
  * of a SHM environment far, far easier -- it is essentially done for you, with many painful details such as
  * naming and cleanup (whether after graceful exit or otherwise) taken care of without your input.  Furthermore
  * it standardizes APIs in such a way as to make it possible to swap between the available SHM-providers without
- * changing code.   (There are some exceptions to this; they are well explained in docs.)
+ * changing code.  (There are some exceptions to this; they are well explained in docs.)
  *
- * Regardless of approach, you will need to choose which SHM-provider to use for your application. I (ygoldfel) would
- * informally recommend looking at it from the angle of approach 2, as the ipc::session paradigm might clarify
- * the high-level differences between the SHM-providers.  I will now *briefly* describe and contrast the
- * SHM-providers.
+ * Regardless of approach, you will need to choose which SHM-provider to use for your application.  I (ygoldfel)
+ * would informally recommend looking at it from the angle of approach 2, as the ipc::session paradigm might clarify
+ * the high-level differences between the SHM-providers.  I will now describe and contrast the SHM-providers.
  *
  * As of this writing there are two known types of SHM-providers: *arena-sharing* and *arena-lending*, of which
  * only the latter is formalized in terms of its general properties.
@@ -56,8 +55,8 @@
  *     simplicity, the lend/borrow aspects of it (where side/process 1 of a session *lends* a SHM-allocated object to
  *     side/process 2 which *borrows* it, thus incrementing the conceptual cross-process ref-count to 2) are
  *     properties of the arena-object `Pool_arena` itself.
- *   - Arena-lending: We have one SHM-provider as of this writing: shm::arena_lend::jemalloc; it is an application
- *     of the formalized arena-lending-SHM-provider paradigm specifically to the commercial-grade
+ *   - Arena-lending: We have one SHM-provider as of this writing: shm::arena_lend::jemalloc (SHM-jemalloc); it is an
+ *     application of the formalized arena-lending-SHM-provider paradigm specifically to the commercial-grade
  *     3rd party open-source `malloc()` provider (memory manager): [jemalloc](https://jemalloc.net).  It could be
  *     applied to other memory managers; e.g., tcmalloc.  (At the moment we feel jemalloc is the most
  *     advanced and customizable open-source `malloc()`er around.)  Generally the memory-manager-agnostic aspects
@@ -67,10 +66,25 @@
  *     again, the memory-manager-agnostic and -non-agnostic aspects respectively.)  With an arena-lending SHM-provider,
  *     *each* of the two processes in a session creates/maintains its own arena, in which the other side cannot
  *     allocate; then via the session object the other side *borrows* an allocated object which it can at least
- *     read (but not deallocate; and by default not write-to).  Thus process 1 maintains a jemalloc-managed arena;
+ *     read (but not deallocate; and not write-to).  Thus process 1 maintains a jemalloc-managed arena;
  *     process 2 borrows objects from it and reads them; and conversely process 2 maintains a jemalloc-managed arena;
  *     process 1 borrows objects from it and reads them.  Hence there are 2 process-local *SHM-arenas* and 1
  *     *SHM-session* for bidirectional lending/borrowing.
+ *
+ * @note It says above, "(but not deallocate; and not write-to)."  Regarding, specifically, not being able to write to
+ *       (already allocated, by owner-side, buffers): it is a subtle situation.  As of this writing, for SHM-jemalloc,
+ *       this is in fact disallowed, in that internally borrower-side we open the SHM areas with read-only
+ *       enforcement by the OS; writing a byte causes a fault.  (As mentioned below this has potentially important
+ *       safety benefits.)  However, it would not be crazy to make this read-only policy optional; a version of
+ *       SHM-jemalloc subsequent to this note may do so.  At the cost of losing those safety benefits, which may
+ *       not apply to some applications in practice, one would enable a range of algorithms and techniques
+ *       (in-SHM mutexes for example).  *That* said: it is important to remember that, while that degree of freedom
+ *       (allow versus disallow writing) is essentially available for arena-lending SHM-providers, the same
+ *       is *not* true of whether the borrower side can [de]allocate or not.  By design of the arena-lending
+ *       SHM-provider type, the borrower side cannot [de]allocate (in the borrowed arena).  That limits some
+ *       algorithmic possibilities.  For example, supposing borrower-side writing ability were enabled: one could
+ *       write to an element of a `vector v`, but `v.push_back()` would only work if it kept
+ *       `v.size() <= v.capacity()`.
  *
  * shm::classic is deliberately minimalistic.  As a result it is very fast around setup (which involves, simply,
  * an OS SHM-open operation on each side) and around lend/borrow time (when a process wants to share a SHM-stored datum
@@ -86,8 +100,8 @@
  *     complicates recovery.  If process X of multiple co-sharing processes goes down or is ill, the entirety
  *     of the SHM-stored data in this system is suspect and should probably be freed, all algorithms restarted.
  *
- * There are no particular plans to make shm::classic more sophisticated or to formalize its type ("arena-sharing") to
- * be extensible to more variations.  It fulfills its purpose; and in fact it may be suitable for many applications.
+ * There are no particular plans to make shm::classic more sophisticated.  It fulfills its purpose; and in fact it is
+ * suitable for many applications.
  *
  * In contrast shm::arena_lend is sophisticated.  A process creates an *arena* (or arenas);
  * one can allocate objects in arenas.  A real memory manager is in charge of the mechanics of allocation; except
@@ -110,11 +124,11 @@
  *     Hence if process X goes down or is ill, the arenas created by the other processes in the system can continue
  *     safely.
  *
- * The negatives are a large increase in complexity and novelty; and possible risks of sporadically increased latency
- * when SHM-allocating (as, internally, SHM-pool collections must be synchronized across session-connected processes)
- * and during setup (as, during the initial arena-lend one may need to communicate a large built-up SHM-pool
- * collection).  Just to set up a session, one must provide an ipc::transport::struc::Channel for
- * the SHM-session's internal use to synchronize pool collections and more.
+ * The negatives are a large increase in complexity and novelty; and the reduced flexibility w/r/t what
+ * algorithms/techniques one can use, since only the owning side can [de]allocate in, or write to, a given data
+ * structure.  In terms of initial setup, it is -- if one does not use ipc::session to do it -- more demanding:
+ * Just to establish a SHM-session between processes A and B, one must provide a low-level A-B IPC channel for the
+ * SHM-session's internal use to synchronize pool collections.
  *
  * Lastly, as it stands, the arena-lending paradigm does lack one capability of SHM-classic; it is fairly
  * advanced and may or may not come up as an actual problem:
@@ -130,15 +144,16 @@
  * In the ipc::session paradigm this type of data is known as *app-scope* in contrast to most data which are
  * *session-scope*.  For data relevant only to each conversation A-B1, A-B2, A-B3, there is no asymmetry: Internally
  * there are 2 arenas in each of the 3 sessions, but conceptually it might as well be 1 common arena, since both
- * sides have symmetrical capabilities (allocate, read/write, lend; borrow, read/write).  So for session-scope data
- * shm::classic and shm::arena_lend are identical.
+ * sides have symmetrical capabilities (allocate, read/write, lend; borrow, read -- and, with SHM-classic, write; see
+ * @note above).  So for session-scope data shm::classic and shm::arena_lend are equivalent for most purposes.
  *
  * ### STL support ###
  * The other major sub-module, as mentioned, is agnostic to the specific SHM-provider.  It allows one to store
  * complex native C++ data directly in SHM.  Namely, arbitrary combinations of STL-compliant containers, `struct`s,
- * fixed-length arrays, scalars, and even pointers are supported.  Both SHM-providers above (shm::classic and
- * shm::arena_lend::jemalloc) provide the semantics required to correctly plug-in to this system.  See doc header
- * for namespace shm::stl to continue exploring this topic.
+ * fixed-length arrays, and scalars.  (Even pointers can be stored; one only needs to use `Arena::Pointer<T>`
+ * in lieu of `T*`.)  Both SHM-providers above (shm::classic and shm::arena_lend::jemalloc) provide the semantics
+ * required to correctly plug-in to this system.  See doc header for namespace shm::stl to continue exploring
+ * this topic.
  */
 namespace ipc::shm
 {

@@ -19,6 +19,8 @@
 #pragma once
 
 #include "ipc/shm/stl/arena_activator.hpp"
+#include <memory>
+#include <type_traits>
 
 namespace ipc::shm::stl
 {
@@ -27,23 +29,23 @@ namespace ipc::shm::stl
 
 /**
  * Stateless allocator usable with STL-compliant containers to store (or merely read) them directly in SHM in
- * a given SHM-aware `Arena`.  Please read background in shm::stl namespace doc header (shm_stl_fwd.hpp).
+ * a given SHM-aware `Arena`.  Please read background in shm::stl namespace doc header (stl_fwd.hpp).
  *
  * ### How to use ###
  * Suppose `T` is a container type with `Allocator` template param given as `Stateless_allocator<E>`, as well
  * as any nested element types that are also containers also specifying `Allocator` as `Stateless_allocator<...>`.
- * Suppose you want to work with a `T* t`, such that `t` points to `sizeof(T)` bytes in SHM inside some
- * #Arena_obj `A`.  In order to perform any work on the `*t` -- including construction, destruction, and any other
+ * Suppose you want to work with a `T* t`, such that `t` points to `sizeof(T)` bytes in SHM inside some #Arena
+ * `A`.  In order to perform any work on the `*t` -- including construction, destruction, and any other
  * operations that require internal alloc/dealloc/ptr-deref also inside `A` -- activate `&A` in the relevant
  * thread using an Arena_activator.  For example:
  *
  *   ~~~
  *   using Shm_classic_arena = classic::Pool_arena;
  *   template<typename T>
- *   using Shm_classic_allocator = Stateless_allocator<T, Shm_classic_arena>;
- *   using Shm_classic_arena_activator = Arena_activator<Shm_classic_arena>;
+ *   using Shm_classic_allocator = Stateless_allocator<T, Shm_classic_arena>; // Or use Shm_classic_arena::Allocator.
+ *   using Shm_classic_arena_activator = Arena_activator<Shm_classic_arena>; // Or use Shm_classic_arena::Activator.
  *
- *   struct Widget { m_float m_a; m_int m_b; }
+ *   struct Widget { float m_a; int m_b; };
  *   using Widget_list = list<Widget, Shm_classic_allocator<Widget>>;
  *   using Widget_list_vec = vector<Widget_list, Shm_classic_allocator<Widget_list>>;
  *
@@ -58,7 +60,7 @@ namespace ipc::shm::stl
  *
  * Note you may nest Arena_activator contexts in stack-like fashion.  Note, also, that `Arena_activator<A1>`
  * operates completely independently from `Arena_activator<A2>`, even in the same thread, if `A1` is not same-as
- * `A2`.  So any "clash" would only occur (1) in a given thread, not across threads; (2) for a given SHM provider
+ * `A2`.  So any "clash" would only occur (1) in a given thread, not across threads; (2) for a given SHM-provider
  * type, not across 2+ such types.
  *
  * The allocator is *stateless*.  It takes no space within any container that uses it; and it is always default-cted
@@ -69,23 +71,25 @@ namespace ipc::shm::stl
  * For write+allocate+deallocate capabilities of Stateless_allocator: an `Arena` must have the following members:
  *   - `void* allocate(size_t n);`: Allocate uninitialized buffer of `n` bytes in this SHM arena;
  *     return locally-dereferenceable pointer to that buffer.  Throw exception if ran out of resources.
- *     (Some providers try hard to avoid this.)
+ *     (Some providers try hard to avoid this.)  Must not return null: Stateless_allocator uses the result unchecked.
  *   - `void deallocate(void* p)`: Undo `allocate()` that returned `p`; or the equivalent operation
- *     if the SHM provider allows process 2 to deallocate something that was allocated by process 1 (and `p` indeed
+ *     if the SHM-provider allows process 2 to deallocate something that was allocated by process 1 (and `p` indeed
  *     was `allocate()`ed in a different process but transmitted to the current process; and was properly made
  *     locally-dereferenceable before passing it to this method).
+ *     Must not throw.  Stateless_allocator::deallocate() is `noexcept` (as STL-compliant allocators' deallocation
+ *     must be, as it runs during destruction and stack unwinding); so a throw here would `std::terminate()`.
  *   - `template<typename T> class Pointer`: `Pointer<T>` must, informally speaking, mimic `T*`; formally
  *     being a *fancy pointer* in the STL sense.  The locally-dereferenceable `T*` it yields must point to the
- *     same underlying area in SHM regardless of which `Arena`-aware process the deref API is invoked.
+ *     same underlying area in SHM regardless of in which `Arena`-aware process the deref API is invoked.
  *     - The `class` keyword is for exposition only; it can also be `using`, `typedef`, or anything else,
  *       provided it mimics `T*` as described.
- *     - For example, if #Arena_obj is classic::Pool_arena, then classic::Pool_arena::Pointer might be
+ *     - For example, if #Arena is classic::Pool_arena, then classic::Pool_arena::Pointer might be
  *       `bipc::offset_ptr`, which internally stores merely an offset within the same SHM-pool versus its own
- *       `this`; this works great as long indeed the `Pointer` *itself* is located inside the same SHM-pool as the
+ *       `this`; this works great as long as indeed the `Pointer` *itself* is located inside the same SHM-pool as the
  *       thing to which it points.
  *
- * @todo Currently `Arena::Pointer` shall be a fancy-pointer, but we could support raw pointers also.  Suppose
- * #Arena_obj is set up in such a way as to map all processes' locally-dereferenceable pointers to the same SHM
+ * @todo Currently `Arena::Pointer` shall be a fancy-pointer, but we could support raw pointers also.
+ * Suppose #Arena is set up in such a way as to map all processes' locally-dereferenceable pointers to the same SHM
  * location to the same numeric value (by specifying each pool's start as some predetermined numerical value in
  * the huge 64-bit vaddr space) in all processes sharing that SHM pool.  Now no address translation is
  * needed, and `Arena::Pointer` could be simply `T*`.  As of this writing some inner impl details assume
@@ -101,33 +105,34 @@ namespace ipc::shm::stl
  *   - No activator -- in fact, no `Arena` *object* -- only the *type*! -- shall be used by Stateless_allocator.
  *
  * @internal
+ *
  * ### Implementation ###
  * It is self-explanatory; the trick was knowing what was actually required according to STL-compliance documentation.
  * The great thing is, since C++11, only very few things are indeed needed in our situation; the rest is
- * supplied with sensible default by `allocator_traits` which is how STL-compliant container code actually accesses
+ * supplied with sensible defaults by `allocator_traits` which is how STL-compliant container code actually accesses
  * `Allocator`s like ours.
  *
  * @endinternal
  *
  * @tparam T
  *         Pointed-to type for the allocator.  See standard C++ `Allocator` concept.
- * @tparam Arena
- *         See above.
+ * @tparam Arena_t
+ *         See above + #Arena.
  */
-template<typename T, typename Arena>
+template<typename T, typename Arena_t>
 class Stateless_allocator
 {
 public:
   // Types.
 
-  /// Short-hand for `T`.
+  /// Alias for `T`.
   using Value = T;
 
-  /// Short-hand for the `Arena` type this uses for allocation/deallocation/pointer semantics.
-  using Arena_obj = Arena;
+  /// Alias for the `Arena_t` type this uses for allocation/deallocation/pointer semantics.
+  using Arena = Arena_t;
 
   /// The required pointer-like type.  See also #pointer.
-  using Pointer = typename Arena_obj::template Pointer<Value>;
+  using Pointer = typename Arena::template Pointer<Value>;
 
   /// Alias to #Pointer for compatibility with STL-compliant machinery (traits, etc.).
   using pointer = Pointer;
@@ -167,7 +172,7 @@ public:
   // Methods.
 
   /**
-   * Allocates an uninitialized buffer of given size, or throws exception if `Arena_obj::allocate()` does;
+   * Allocates an uninitialized buffer of given size, or throws exception if `Arena::allocate()` does;
    * satisfies formal requirements of STL-compliant `Allocator` concept.  See cppreference.com for those formal
    * requirements.
    *
@@ -175,14 +180,14 @@ public:
    *        The buffer allocated shall be sized `n * sizeof(Value)` bytes.
    *        Note: `n` is a #Value count; not a byte count.
    * @return Locally-dereferenceable pointer to the SHM-allocated buffer.
-   *         The buffer is *not* initialized.  E.g., depending on the nature of `T` you may want to placement-ct it
-   *         at this address subsequently.
+   *         The buffer is *not* initialized.  E.g., depending on the nature of #Value you may want to placement-ct it
+   *         (`construct_at()`) at this address subsequently.
    */
   Pointer allocate(size_t n) const;
 
   /**
-   * Deallocates buffer in SHM previously allocated via allocate() in this or other (if #Arena_obj supports this)
-   * process, as long as `p` refers to the beginning of the buffer returned by that allocate();
+   * Deallocates buffer in SHM previously allocated via allocate() or equivalent in this or other (if #Arena
+   * supports this) process, as long as `p` refers to the beginning of the buffer returned by that `allocate()`;
    * satisfies formal requirement of STL-compliant `Allocator` concept.  See cppreference.com for those formal
    * requirements.  Does not throw (as required).
    *
@@ -198,14 +203,14 @@ public:
 
 // Template implementations.
 
-template<typename T, typename Arena>
-typename Stateless_allocator<T, Arena>::Pointer Stateless_allocator<T, Arena>::allocate(size_t n) const
+template<typename T, typename Arena_t>
+typename Stateless_allocator<T, Arena_t>::Pointer Stateless_allocator<T, Arena_t>::allocate(size_t n) const
 {
-  const auto arena = Arena_activator<Arena_obj>::this_thread_active_arena();
+  const auto arena = Arena_activator<Arena>::this_thread_active_arena();
   assert(arena && "Before working with SHM-stored STL-compliant objects: activate an Arena via Arena_activator "
                     "in the thread in question.");
 
-  /* void* -> Value* -> Arena::Pointer<Value>.  The last -> is a key, non-trivial operation that creates
+  /* void* => Value* => Arena::Pointer<Value>.  The last => is a key, non-trivial operation that creates
    * the SHM-storable fancy-pointer from a locally-dereferenceable raw pointer.  Though typically the fancy-pointer
    * template Arena::Pointer<> would have a ctor that takes a Value*, officially in STL-compliant land it's
    * the static pointer_to() factory.  pointer_traits<>::pointer_to(T&) does that for non-raw
@@ -220,14 +225,14 @@ typename Stateless_allocator<T, Arena>::Pointer Stateless_allocator<T, Arena>::a
                 (arena->allocate(n * sizeof(Value))))); // May throw.
 }
 
-template<typename T, typename Arena>
-void Stateless_allocator<T, Arena>::deallocate(Pointer p, size_t) const noexcept
+template<typename T, typename Arena_t>
+void Stateless_allocator<T, Arena_t>::deallocate(Pointer p, size_t) const noexcept
 {
-  const auto arena = Arena_activator<Arena_obj>::this_thread_active_arena();
+  const auto arena = Arena_activator<Arena>::this_thread_active_arena();
   assert(arena && "Before working with SHM-stored STL-compliant objects: activate an Arena via Arena_activator "
                     "in the thread in question.");
 
-  /* Arena::Pointer<Value> -> Value* -> void*.  The first -> is a key, non-trivial operation that obtains
+  /* Arena::Pointer<Value> => Value* => void*.  The first => is a key, non-trivial operation that obtains
    * a locally-dereferenceable raw pointer from the fancy-pointer.  This is expressible generically in a number
    * of ways; but for any fancy-pointer type `.operator->()` will do it.
    * @todo In C++20 std::to_address() would invoke that for fancy-pointer and simply pass-through the T*
@@ -236,34 +241,34 @@ void Stateless_allocator<T, Arena>::deallocate(Pointer p, size_t) const noexcept
   arena->deallocate(static_cast<void*>(p.operator->()));
 }
 
-template<typename T, typename Arena>
-Stateless_allocator<T, Arena>::Stateless_allocator() = default;
+template<typename T, typename Arena_t>
+Stateless_allocator<T, Arena_t>::Stateless_allocator() = default;
 
-template<typename T, typename Arena>
+template<typename T, typename Arena_t>
 template<typename U>
-Stateless_allocator<T, Arena>::Stateless_allocator(const Stateless_allocator<U, Arena>&)
+Stateless_allocator<T, Arena_t>::Stateless_allocator(const Stateless_allocator<U, Arena>&)
 {
   // As usual... do nothin'... there's no state.
 }
 
-template<typename T, typename Arena>
+template<typename T, typename Arena_t>
 template<typename U>
-Stateless_allocator<T, Arena>::Stateless_allocator(Stateless_allocator<U, Arena>&&)
+Stateless_allocator<T, Arena_t>::Stateless_allocator(Stateless_allocator<U, Arena>&&)
 {
   // As usual... do nothin'... there's no state.
 }
 
-template<typename Arena, typename T1, typename T2>
-bool operator==(const Stateless_allocator<T1, Arena>&, const Stateless_allocator<T2, Arena>&)
+template<typename Arena_t, typename T1, typename T2>
+bool operator==(const Stateless_allocator<T1, Arena_t>&, const Stateless_allocator<T2, Arena_t>&)
 {
-  static_assert(std::is_empty_v<Stateless_allocator<T1, Arena>>,
+  static_assert(std::is_empty_v<Stateless_allocator<T1, Arena_t>>,
                 "Stateless_allocator<> is currently designed around being empty (static-data-only) -- "
                   "did it gain state?");
   return true;
 }
 
-template<typename Arena, typename T1, typename T2>
-bool operator!=(const Stateless_allocator<T1, Arena>&, const Stateless_allocator<T2, Arena>&)
+template<typename Arena_t, typename T1, typename T2>
+bool operator!=(const Stateless_allocator<T1, Arena_t>&, const Stateless_allocator<T2, Arena_t>&)
 {
   return false;
 }

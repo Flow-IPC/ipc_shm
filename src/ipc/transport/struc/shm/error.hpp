@@ -99,8 +99,8 @@ namespace boost::system
 /**
  * Ummm -- it specializes this `struct` to -- look -- the end result is boost.system uses this as
  * authorization to make `enum` `Code` convertible to `Error_code`.  The non-specialized
- * version of this sets `value` to `false`, so that random arbitary `enum`s can't just be used as
- * `Error_code`s.  Note that this is the offical way to accomplish that, as (confusingly but
+ * version of this sets `value` to `false`, so that random arbitrary `enum`s can't just be used as
+ * `Error_code`s.  Note that this is the official way to accomplish that, as (confusingly but
  * formally) documented in boost.system docs.
  */
 template<>
