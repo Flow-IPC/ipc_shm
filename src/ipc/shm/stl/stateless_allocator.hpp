@@ -140,6 +140,29 @@ public:
   /// Alias to #Value for compatibility with STL-compliant machinery (traits, etc.).
   using value_type = Value;
 
+  /**
+   * Signed type for differences between #Pointer values, for compatibility with STL-compliant machinery (traits,
+   * etc.).  This is the default `std::allocator_traits` would use anyway, if this alias were not here.
+   *
+   * ### Rationale ###
+   * Why define it (and #size_type) then?  1, is it dangerous + 2, why do it regardless?  Answer 1: Not dangerous: as
+   * `allocator_traits` would choose it anyway as noted.  Answer 2: Doing it because some real-life container types,
+   * due to slightly not-quite-following standard requirements, will refuse as of this writing to compile
+   * when using us as the allocator with #Arena = `Ipc_arena` from SHM-jemalloc.  Specifically:
+   * `boost::container::allocator_traits` does not follow the standard defaults: if the allocator lacks these aliases,
+   * it uses `std::ptrdiff_t` and `std::size_t`, regardless of #Pointer.  Meanwhile some boost.container code
+   * (e.g., `deque` internals) as of this writing also uses the `Pointer`-derived types, mixing the two.  So
+   * if #Pointer `difference_type` is narrower than `std::ptrdiff_t` -- as with SHM-jemalloc's `Shm_pool_offset_ptr` --
+   * such code can fail to compile (ambiguous overloads).  Defining these two aliases keeps both sources
+   * consistent.
+   *
+   * So do not remove these as seemingly redundant.
+   */
+  using difference_type = typename std::pointer_traits<Pointer>::difference_type;
+
+  /// Unsigned counterpart of #difference_type, for compatibility with STL-compliant machinery; see #difference_type.
+  using size_type = std::make_unsigned_t<difference_type>;
+
   // Constructors/destructor.
 
   /// Allocator concept requirement for default-ctor: no-op since it's a stateless allocator.
