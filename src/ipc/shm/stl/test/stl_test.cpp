@@ -18,7 +18,9 @@
 #include "ipc/shm/stl/test/stl_test.hpp"
 #include "ipc/common.hpp"
 #include <boost/interprocess/offset_ptr.hpp>
+#include <cstddef>
 #include <cstdlib>
+#include <limits>
 #include <new>
 
 // Instantiation of the Stl_test suite (see stl_test.hpp) for a minimal heap-based arena: no SHM involved at all.
@@ -52,7 +54,10 @@ public:
 
   void* allocate(size_t n)
   {
-    const auto buf = std::malloc(n);
+    /* The size check is redundant with malloc()'s own failure; but without it gcc-13 (optimized) sees a
+     * (never-taken) path in boost.container string code passing SIZE_MAX here and warns (-Walloc-size-larger-than).
+     * Same work-around as in flow::util::Basic_blob::reserve_impl() (see the explanation there; gcc bug 85783). */
+    const auto buf = (n > size_t(std::numeric_limits<ptrdiff_t>::max())) ? nullptr : std::malloc(n);
     if (!buf)
     {
       throw std::bad_alloc{};

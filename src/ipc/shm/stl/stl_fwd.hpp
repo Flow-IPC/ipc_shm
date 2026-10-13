@@ -18,6 +18,8 @@
 /// @file
 #pragma once
 
+#include <boost/move/traits.hpp>
+
 /**
  * ipc::shm sub-module providing integration between STL-compliant components (including containers)
  * and SHared Memory (SHM) providers.
@@ -228,3 +230,51 @@ template<typename Arena_t, typename T1, typename T2>
 bool operator!=(const Stateless_allocator<T1, Arena_t>& val1, const Stateless_allocator<T2, Arena_t>& val2);
 
 } // namespace ipc::shm::stl
+
+namespace boost
+{
+
+// Types.
+
+/**
+ * Specializes this boost.move trait for every ipc::shm::stl::Stateless_allocator, so as to disable the optimization
+ * it controls -- in turn working around a boost.container bug in the Boost versions we support (as of this writing).
+ *
+ * Background: `has_trivial_destructor_after_move<X>::value == true` tells boost.container that a moved-from `X`
+ * need not be destroyed.  E.g., boost.container `vector<X>::erase()` (or for `flat_map<K, X>`) then skips destroying
+ * the moved-from elements.  For `X` = boost.container `basic_string`, `deque`, and `stable_vector` that trait is
+ * computed as `true` if it is `true` for the `X`'s allocator type (which by default it is for any trivially
+ * destructible allocator type, including ours); yet `X`'s move-assignment can leave the moved-from source owning
+ * memory.  So that memory leaks.  The bug is fixed in boost.container `develop` branch but not
+ * in any release through Boost-1.92 (past that version: to be seen as of this writing).  With this specialization
+ * those `X` traits are `false` for `X`s using `Stateless_allocator`; so the moved-from elements are destroyed,
+ * and nothing leaks.
+ *
+ * @note This is a legal technique; we are imposing this on `Stateless_allocator` only.  It's arguably a hack, but
+ *       it is a legal hack.
+ *
+ * @see ticket we filed: https://github.com/boostorg/container/issues/351. It applies at least through Boost-1.92.
+ *
+ * The cost of this: An extra (no-op) destructor call per moved-from element *in such cases*.  It affects only
+ * containers whose elements are themselves containers using Stateless_allocator; for example
+ * `vector<int, Stateless_allocator<...>>` is not affected.
+ *
+ * @todo Once our minimum supported Boost (per our build script(s)) version includes the fix for the bug
+ * worked-around by `boost::has_trivial_destructor_after_move<ipc::shm::stl::Stateless_allocator>` specialization:
+ * remove that specialization.  As of Boost-1.92 the bug is there.
+ *
+ * @tparam T
+ *         See ipc::shm::stl::Stateless_allocator.
+ * @tparam Arena_t
+ *         See ipc::shm::stl::Stateless_allocator.
+ */
+template<typename T, typename Arena_t>
+struct has_trivial_destructor_after_move<::ipc::shm::stl::Stateless_allocator<T, Arena_t>>
+{
+  // Constants.
+
+  /// Means: do not skip destroying moved-from objects whose type uses this allocator type.  See above.
+  static const bool value = false;
+};
+
+} // namespace boost

@@ -18,6 +18,7 @@
 /// @file
 #pragma once
 
+#include "ipc/shm/stl/stl_fwd.hpp"
 #include <flow/util/util.hpp>
 
 namespace ipc::shm::stl

@@ -30,6 +30,7 @@
 #include <boost/container/string.hpp>
 #include <boost/container/vector.hpp>
 #include <boost/container_hash/hash.hpp>
+#include <boost/move/traits.hpp>
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <gtest/gtest.h>
 #include <cstdint>
@@ -568,6 +569,32 @@ TYPED_TEST_P(Stl_test, Vector)
       EXPECT_EQ(arena->n_live(), 0u);
     }
     Fixture::expect_clean(*arena);
+
+    /* vector of strings: non-tail erase (single, range) moves the later strings down and must free the erased ones'
+     * buffers.  This is exactly what released boost.container gets wrong (leak), unless the trait is `false`, as
+     * our boost::has_trivial_destructor_after_move<Stateless_allocator> specialization ensures.  See its doc header. */
+    static_assert(!boost::has_trivial_destructor_after_move<typename Fixture::String>::value,
+                  "Our trait specialization should make it false for a string using Stateless_allocator.");
+    static_assert(!boost::has_trivial_destructor_after_move<typename Fixture::Int_deque>::value,
+                  "Our trait specialization should make it false for a deque using Stateless_allocator.");
+    {
+      constexpr int N_STRS = 10;
+      typename Fixture::Str_vec vec;
+      for (int id = 0; id != N_STRS; ++id)
+      {
+        vec.push_back(Fixture::to_shm(Fixture::long_str(id)));
+      }
+      const auto n_live_0 = arena->n_live();
+
+      vec.erase(vec.begin() + 2); // Single, non-tail.
+      EXPECT_EQ(arena->n_live(), n_live_0 - 1) << "Erasing a string should free its buffer.";
+      vec.erase(vec.begin(), vec.begin() + 3); // Range, non-tail.
+      EXPECT_EQ(arena->n_live(), n_live_0 - 4) << "Erasing strings should free their buffers.";
+      ASSERT_EQ(vec.size(), size_t(N_STRS - 4));
+      EXPECT_EQ(Fixture::to_std(vec.front()), Fixture::long_str(4));
+      EXPECT_EQ(Fixture::to_std(vec.back()), Fixture::long_str(N_STRS - 1));
+    }
+    Fixture::expect_clean(*arena);
   });
 } // TYPED_TEST_P(Stl_test, Vector)
 
@@ -701,6 +728,10 @@ TYPED_TEST_P(Stl_test, Flat_map)
       EXPECT_EQ(Fixture::to_std(map.at(0)), Fixture::long_str(0));
       EXPECT_EQ(Fixture::to_std(map.at(N - 1)), Fixture::long_str(N - 1));
 
+      /* On Boost versions with the boost.container bug worked around by our
+       * boost::has_trivial_destructor_after_move<Stateless_allocator> specialization (see its doc header), this erase
+       * would leak the erased strings' buffers (and the counts below would show it).  (Vector test covers this
+       * more directly, via a vector of strings.) */
       map.erase(map.begin(), map.begin() + (N / 2));
       EXPECT_EQ(arena->n_live(), size_t((N / 2) + 1));
 

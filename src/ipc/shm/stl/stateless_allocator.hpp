@@ -18,6 +18,7 @@
 /// @file
 #pragma once
 
+#include "ipc/shm/stl/stl_fwd.hpp"
 #include "ipc/shm/stl/arena_activator.hpp"
 #include <memory>
 #include <type_traits>
