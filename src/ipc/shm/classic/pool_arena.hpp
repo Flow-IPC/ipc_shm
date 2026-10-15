@@ -1065,6 +1065,9 @@ Pool_arena::Handle<T> Pool_arena::construct(Ctor_args&&... ctor_args)
   // using flow::util::construct_at; // C++20 => can conflict with incidentally included std:: counterpart.
   using boost::shared_ptr;
 
+  static_assert(alignof(Shm_handle) <= flow::util::max_align_sz(),
+                "allocate() guarantees only std::max_align_t alignment; over-aligned T is not supported.");
+
   if (!m_pool)
   {
     return Handle<Value>{};

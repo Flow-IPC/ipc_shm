@@ -20,6 +20,7 @@
 
 #include "ipc/shm/stl/stl_fwd.hpp"
 #include "ipc/shm/stl/arena_activator.hpp"
+#include <flow/util/util.hpp>
 #include <memory>
 #include <type_traits>
 
@@ -73,6 +74,9 @@ namespace ipc::shm::stl
  *   - `void* allocate(size_t n);`: Allocate uninitialized buffer of `n` bytes in this SHM arena;
  *     return locally-dereferenceable pointer to that buffer.  Throw exception if ran out of resources.
  *     (Some providers try hard to avoid this.)  Must not return null: Stateless_allocator uses the result unchecked.
+ *     The buffer must be aligned at least as `std::max_align_t` (like `malloc()`'s result).  (Corollary: value types
+ *     with stricter alignment requirements are not supported; Stateless_allocator::allocate() `static_assert()`s
+ *     this.)
  *   - `void deallocate(void* p)`: Undo `allocate()` that returned `p`; or the equivalent operation
  *     if the SHM-provider allows process 2 to deallocate something that was allocated by process 1 (and `p` indeed
  *     was `allocate()`ed in a different process but transmitted to the current process; and was properly made
@@ -230,6 +234,10 @@ public:
 template<typename T, typename Arena_t>
 typename Stateless_allocator<T, Arena_t>::Pointer Stateless_allocator<T, Arena_t>::allocate(size_t n) const
 {
+  static_assert(alignof(Value) <= flow::util::max_align_sz(),
+                "Arena::allocate() takes no alignment arg and guarantees only std::max_align_t alignment; "
+                  "over-aligned value types are not supported.");
+
   const auto arena = Arena_activator<Arena>::this_thread_active_arena();
   assert(arena && "Before working with SHM-stored STL-compliant objects: activate an Arena via Arena_activator "
                     "in the thread in question.");
