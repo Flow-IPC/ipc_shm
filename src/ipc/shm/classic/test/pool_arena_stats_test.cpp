@@ -338,10 +338,6 @@ TEST(Pool_arena_stats_test, info_dump_and_print)
   dump.m_fmt.m_multiline = false;
   FLOW_LOG_INFO("Ditto (single-line): [" << dump << "].");
 
-  // Exercise the Call_timing parameter (no behavioral difference for SHM-classic; it exists for API genericity).
-  a.info_dump(&dump, util::Call_timing::S_CALLER_ENSURES_SAFE);
-  EXPECT_EQ(dump.m_arena_sz_or_0, a.arena_size());
-
   // The invalid-arena corner: a Pool_arena that failed to attach reports "no stats" rather than nonsense.
   Error_code err_code;
   Pool_arena bad{g_logger, Shared_name::ct("flowIpcTestPoolArenaStatsNoSuchPool"), util::OPEN_ONLY, false,

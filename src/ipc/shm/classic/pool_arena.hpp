@@ -783,13 +783,8 @@ public:
    *
    * @param target_info_dump
    *        The non-`->m_fmt` parts shall be assigned.
-   * @param call_timing
-   *        See util::Call_timing doc header(s).  Has *no effect* for SHM-classic; it is accepted only so that
-   *        Pool_arena and the SHM-jemalloc `jemalloc::Ipc_arena`/`jemalloc::Shm_session` share one info_dump()
-   *        signature (enabling generic use).  SHM-classic gathers no timing-sensitive stats.
    */
-  void info_dump(Info_dump* target_info_dump,
-                 util::Call_timing call_timing = util::Call_timing::S_ALWAYS_SAFE) const;
+  void info_dump(Info_dump* target_info_dump) const;
 
   // Data.
 

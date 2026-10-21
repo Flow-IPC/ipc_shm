@@ -389,7 +389,7 @@ void Pool_arena::local_stats_reset()
   flow::util::stat::stats_reset(&m_local_stats, stat::Local_stats{});
 }
 
-void Pool_arena::info_dump(Info_dump* target_info_dump, [[maybe_unused]] util::Call_timing) const
+void Pool_arena::info_dump(Info_dump* target_info_dump) const
 {
   using flow::util::stat::stats_assign;
 
