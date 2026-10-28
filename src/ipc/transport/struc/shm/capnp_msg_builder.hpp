@@ -577,7 +577,7 @@ bool Capnp_message_builder<Shm_arena>::lend(Capnp_root_builder* capnp_root, Sess
       FLOW_LOG_DATA("Segment contents: "
                     "[\n" << buffers_dump_string(Blob_const{&(blob.front()), blob.size()}, "  ") << "].");
     } // for (idx in [0, size()))
-  } // Arena_activator arena_ctx(m_arena);
+  } // Arena_activator arena_ctx{m_arena};
 
   /* And now just record the process-agnostic serialization of the handle to the whole thing.  Nice and small!
    * The rest is inside `blobs` which is wholly in SHM and needs no encoding. */
@@ -666,9 +666,9 @@ kj::ArrayPtr<::capnp::word>
      * So see those notes in Basic_blob::reserve_impl() and come back to Flow-IPC-land to see what we might do
      * for a perf bump here.
      *
-     * Caution!  If you choose to change-over to vector<..., util::Default_init_allocator<...>> instead, then
+     * Caution!  If you choose to change-over to vector<..., flow::util::Default_init_allocator<...>> instead, then
      * you'll need to have `std::memset(buf_ptr, 0, seg_sz)` (or some equivalent) here. */
-  } // Arena_activator arena_ctx(m_arena);
+  } // Arena_activator arena_ctx{m_arena};
 
   // Since we are supposed to grow exponentially, increase this for next time (if any):
   m_segment_sz += seg_sz; // Word-multiple + word-multiple = word-multiple.
