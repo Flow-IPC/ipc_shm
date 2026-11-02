@@ -24,6 +24,8 @@
  * ipc::session::shm is itself empty or almost empty; but for each possible SHM-provider there is a further
  * sub-namespace; for example ipc::session::shm::classic.
  *
+ * @see The guided Manual chapters @ref chan_struct_advanced and @ref transport_shm cover SHM-backed sessions in use.
+ *
  * ### Background ###
  * ipc::shm provides SHM facilities, including ipc::shm::classic and ipc::shm::arena_lend::jemalloc, that can be used
  * stand-alone, without ipc::session.  As with ipc::transport, though, this is not very convenient.

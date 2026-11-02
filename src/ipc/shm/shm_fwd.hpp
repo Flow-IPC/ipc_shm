@@ -27,6 +27,8 @@
  * plus provider-agnostic support for SHM-stored native-C++ STL-compliant data structures.  See the doc headers
  * for each sub-namespace for further information.
  *
+ * @see The guided Manual chapter @ref transport_shm covers these topics, including the choice of SHM-provider.
+ *
  * That said here's an overview.
  *
  * ### SHM-providers (ipc::shm::classic, ipc::shm::arena_lend) ###

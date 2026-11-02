@@ -32,6 +32,8 @@
  * templates which enable (in a SHM-provider-parameterized way) zero-copyable structured messages by implementing
  * the aforementioned pair of concepts respectively.
  *
+ * @see The guided Manual chapters @ref chan_struct and @ref chan_struct_advanced cover zero-copy structured transport.
+ *
  * Sub-namespaces, including struc::shm::classic and struc::shm::arena_lend::jemalloc as of this writing,
  * pertain to SHM-provider-specific items relevant (at least) to that pair of templates (`Builder` and `Reader`).
  * In particular, e.g., struc::shm::classic::Builder is the concrete type that implements

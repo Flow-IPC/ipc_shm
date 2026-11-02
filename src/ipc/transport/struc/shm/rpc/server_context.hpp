@@ -32,6 +32,10 @@ namespace ipc::transport::struc::shm::rpc
 
 /**
  * The mirror of an opposing PEER-state Client_context, as generated via successful Context_server::accept().
+ *
+ * @see ipc::transport::struc::shm::rpc namespace doc header for an overview of Flow-IPC capnp-RPC support, including
+ *      how the present class relates to the others there.
+ *
  * Client_context in PEER state (i.e., on successful `.sync_connect()`) -- therefore also Server_context -- is
  * a bundling of:
  *   - ipc::session::Session SHM-enabled variant, also in PEER state

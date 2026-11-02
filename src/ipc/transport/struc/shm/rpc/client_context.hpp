@@ -39,6 +39,9 @@ namespace ipc::transport::struc::shm::rpc
  * conversation with an opposing process's Context_server.  On successful connect, it represents one such
  * conversation until its destruction; create another `*this` to begin another such conversation.
  *
+ * @see ipc::transport::struc::shm::rpc namespace doc header for an overview of Flow-IPC capnp-RPC support, including
+ *      how the present class relates to the others there.
+ *
  * Before a successful connection (sync_connect()) a `*this` is said to be in NULL state.  After it and until
  * destruction it is said to be in PEER state.
  *

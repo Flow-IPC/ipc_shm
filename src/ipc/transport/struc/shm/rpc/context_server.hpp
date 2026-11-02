@@ -39,6 +39,9 @@ namespace ipc::transport::struc::shm::rpc
  * produces a Server_context, each of which represents one such conversation until its destruction,
  * exactly mirroring the opposing Client_context in PEER state.
  *
+ * @see ipc::transport::struc::shm::rpc namespace doc header for an overview of Flow-IPC capnp-RPC support, including
+ *      how the present class relates to the others there.
+ *
  * @note No Server_context object coming from a `this->accept()` must exist past the destruction of `*this`.
  *       Context_server maintains certain important commonly shared resources, including SHM, and essentially
  *       precedes and must outlive all relevant IPC work.  (This mirrors the relationship between
@@ -122,7 +125,7 @@ namespace ipc::transport::struc::shm::rpc
  *   - session::Server_session::client_app() (explained above).
  *   - (SHM-classic) session::shm::classic::Session_server::app_shm() (cross-session SHM arena).
  *     - session::shm::classic::Session_server::pool_size_limit_mi() (before affected accept()).
- *   - (SHM-jemalloc) session::shm::arena_lend_jemalloc::Session_server::app_shm() (cross-session SHM arena).
+ *   - (SHM-jemalloc) session::shm::arena_lend::jemalloc::Session_server::app_shm() (cross-session SHM arena).
  *
  * @tparam Session_server_t
  *         A concrete type a-la session::Session_server but SHM-enabled.  As of this writing

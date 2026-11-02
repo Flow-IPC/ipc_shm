@@ -24,6 +24,8 @@
  * ipc::shm sub-module providing integration between STL-compliant components (including containers)
  * and SHared Memory (SHM) providers.
  *
+ * @see The guided Manual chapter @ref transport_shm covers this topic in use.
+ *
  * @note This sub-module/namespace is not limited to working with the jemalloc-based SHM
  *       provider supplied elsewhere in ipc::shm; it can and does work with any other SHM-provider
  *       capable of allocating an uninitialized buffer in SHM and later manually deallocating it by raw pointer.

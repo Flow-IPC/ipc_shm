@@ -39,6 +39,9 @@ namespace ipc::transport::struc::shm::rpc
  * Much like `capnp::EzRpcClient` but uses Flow-IPC zero-copy machinery.  That, at its core, uses Session_vat_network
  * instead of `capnp::TwoPartyVatNetwork`.
  *
+ * @see ipc::transport::struc::shm::rpc namespace doc header for an overview of Flow-IPC capnp-RPC support, including
+ *      how the present class relates to the others there.
+ *
  * Looking at it from the angle of the rest of the present sub-namespace ipc::transport::struc::shm::rpc:
  * This, really, is a quite-thin layer around Client_context.  What it adds is it starts (or shares) the KJ
  * event loop for this thread (instead of taking a pointer to one the user has prepared).  Plus it assumes
@@ -243,6 +246,9 @@ private:
 /**
  * Much like `capnp::EzRpcServer` but uses Flow-IPC zero-copy machinery.  That, at its core, uses Session_vat_network
  * instead of `capnp::TwoPartyVatNetwork`.
+ *
+ * @see ipc::transport::struc::shm::rpc namespace doc header for an overview of Flow-IPC capnp-RPC support, including
+ *      how the present class relates to the others there.
  *
  * Please grok the simpler Ez_rpc_client doc header first; then come back here.
  *

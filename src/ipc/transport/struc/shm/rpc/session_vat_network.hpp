@@ -115,12 +115,16 @@ struct Session_vat_network_base
  * `capnp::VatNetwork` and can be accurately described as `capnp::TwoPartyVatNetwork` but with zero-copy
  * performance.  That is: it behaves ~identically to that stalwart of vanilla capnp-RPC (`TwoPartyVatNetwork`),
  * but every capnp-RPC message (including ones containing user's capnp-encoded data flying back and forth)
- * is (under the hood) allocated in SHM and is *never* copied.  This is essentially all upside, except that
- * Session_vat_network cannot work over a network link (for obvious reasons).  However, API-wise, the two
- * alternatives are used identically after construction!  So to the extent that user code can be written
- * independently of whether networking is involved, one can write generic code that will work with either
- * `capnp::TwoPartyVatNetwork` (required for networking) or Session_vat_network (better for local IPC).  It
- * can even be a template parameter.
+ * is (under the hood) allocated in SHM and is *never* copied.  Hence message size ceases to be a perf
+ * consideration: a large message costs about the same as a small one.  (For small messages, which are cheap to copy
+ * anyway, expect perf similar to `TwoPartyVatNetwork`.)  The one hard limitation: Session_vat_network cannot work
+ * over a network link (for obvious reasons).  However, API-wise, the two alternatives are used identically after
+ * construction!  So to the extent that user code can be written independently of whether networking is involved,
+ * one can write generic code that will work with either `capnp::TwoPartyVatNetwork` (required for networking) or
+ * Session_vat_network (zero-copy-enabled, for local IPC).  It can even be a template parameter.
+ *
+ * @see ipc::transport::struc::shm::rpc namespace doc header for an overview of Flow-IPC capnp-RPC support, including
+ *      how the present class relates to the others there.
  *
  * @note It is also possible to have our Session_vat_network act identically to the vanilla `TwoPartyVatNetwork`,
  *       such as for easy fallback, benchmarking, and so forth.  See the "Bonus!" section below for the recipe.
@@ -199,7 +203,7 @@ struct Session_vat_network_base
  * is gone, but the messages it has produced are still briefly around.  To be more exact:
  *
  * ### The objects of concern ###
- * The objects whole lifetime we must carefully control, so it does not end before all outstanding message-objects
+ * The objects whose lifetime we must carefully control, so it does not end before all outstanding message-objects
  * are gone:
  *   - (If using `shm_enabled_session` ctor form)
  *     - The SHM-enabled session object, from ipc::session: `*shm_enabled_session`.
@@ -277,7 +281,7 @@ struct Session_vat_network_base
  * zero-copy aspects without having to write our own variation of `TwoPartyVatNetwork` all the way through).  Oh
  * and, naturally, read the code.
  *
- * Here we will briefly summarize the key points.
+ * Here we will summarize the key points.
  *
  * There is some code -- very little by volume -- that is essentially lifted-ish from `TwoPartyVatNetwork`.  This
  * includes the on_disconnect() business; the decision for a `*this` to also *be* an #Rpc_conn
@@ -326,13 +330,13 @@ struct Session_vat_network_base
  * also equally possible; and the template parameterization supports all of that.  Arguably this flexibility makes
  * things a bit confusing due to the degrees of freedom.  However: By also supplying higher-level
  * APIs Client_context and Context_server, as well as a range of aliases and documentation, we've reached a good
- * balance.  (Ez_rpc_client and Ez_rpc_server are higher-layer still.)
+ * balance.  (Ez_rpc_client and Ez_rpc_server are higher-level still.)
  *
  * ### Future work ###
  * I (ygoldfel) am reasonably confident that there is not a simpler version of this that somehow reuses existing
  * capnp-RPC features in black-boxy fashion to an even greater extent.  We've really kept everything
- * `TwoPartyVatNetwork` did when transmitting capnp-encoded bytes -- just replacing the nature and size (much
- * smaller!) of what is being encoded, and of course setting up the in-SHM serialization of the actual big payloads
+ * `TwoPartyVatNetwork` did when transmitting capnp-encoded bytes -- just replacing the nature and size
+ * (smaller!) of what is being encoded, and of course setting up the in-SHM serialization of the actual big payloads
  * (from `RpcSystem` and the user's schema/code).
  *
  * There is however, surely, an impl that has better performance by reimplementing more of what a two-party
@@ -354,7 +358,7 @@ struct Session_vat_network_base
  * 2, what is the best integration point between rpc::Session_vat_network and the new serializer.  (Integration
  * with struc::Channel is already through the Struct_builder + Struct_reader concepts, here implemented as
  * shm::Builder and shm::Reader respectively.  `Session_vat_network`'s possible integration methods are more
- * of an open question.)
+ * of an open question.  The ticket (https://github.com/Flow-IPC/ipc/issues/160) may contain detailed ideas.)
  *
  * A reminder: This capnp-RPC integration is an alternative to using struc::Channel which on the one hand is far
  * less flexible semantically (it has request/response and message-type-demuxing... but that's it) but on the other

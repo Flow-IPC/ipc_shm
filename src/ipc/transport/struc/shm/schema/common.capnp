@@ -45,7 +45,7 @@ struct ShmHandle
   # in a user schema; whereas for Flow-IPC's own per-message hot-path headers we store the Data blob in a pre-existing
   # struct, possibly containing other field(s) alongside it.  We do that there to save those bytes along said
   # hot-paths.  See detail/serialization.capnp.  Those structs name their Data field identically to ours, so that
-  # the helpers mentioned just below work on any of them.)
+  # the helpers mentioned just below work on any of them.
 
   shmHandleSerialization @0 :Data;
   # shm::Builder::Session-concept pointee impl lend_object() returns this as a C++ flow::util::Blob_sans_log_context

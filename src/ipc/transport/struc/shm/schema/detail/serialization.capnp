@@ -32,7 +32,7 @@ using Cxx = import "/capnp/c++.capnp";
 #     - detail: Not to be used by external user of this library+API but merely internally.
 $Cxx.namespace("ipc::transport::struc::shm::schema::detail");
 
-# --- shm_serialization.capnp ---
+# --- serialization.capnp ---
 # This schema centers around struct ShmTopSerialization which encodes a SHM-stored list of capnp-generated
 # SHM-stored segments (word arrays), allocated as needed when preceding segment runs out of space inside
 # a mutating capnp-generated mutator call by the user, namely when they're mutating the contents of the out-message
@@ -58,11 +58,11 @@ struct ShmTopSerialization
   # The SHM-handle blob, as returned by the SHM-session's lend_object() (to be passed to the opposing
   # borrow_object()).  Interpret as: Arena::Handle<list<Blob>> from the concept as required by shm::Builder and
   # shm::Reader class templates (see their doc headers).
-  # In the pointed-to structure, each list<> element is capnp-serialized segment.
+  # In the pointed-to structure, each list<> element is a capnp-serialized segment.
   # - Each element Blob::size() is the size used by the serialization, in that segment;
   # - Each Blob::capacity() is the (equal or greater) buffer size allocated for that segment by the
   #   MessageBuilder.
-  # Hence a SegmentArrayMessageReader is to be fed each Blob's [begin, end()) range, and the resulting
+  # Hence a SegmentArrayMessageReader is to be fed each Blob's [begin(), end()) range, and the resulting
   # MessageReader is the zero-copy deserialization of the originally mutated schema.
   #
   # The bottom line is, this blob is small (and of a fixed size for a given SHM-provider) regardless of how
