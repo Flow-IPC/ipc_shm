@@ -73,7 +73,7 @@ private:
   /**
    * Weak-pointer observer to the last-retured in this thread (via this_thread_obj()) `Ptr`; or null.
    * Effectively it is in one of two states:
-   *   - If `s_this_thread_obj_observer.lock() == null`: this_thread_obj() has not been called; or it has been
+   *   - If `s_this_thread_obj_observer.lock() == nullptr`: this_thread_obj() has not been called; or it has been
    *     called, but the returned `Ptr` group has become empty (no references remain).
    *   - Else: The `Ptr` group returned by the last this_thread_obj() is alive.
    */

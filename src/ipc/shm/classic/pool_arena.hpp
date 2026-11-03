@@ -574,7 +574,7 @@ public:
    *         `T` ctor arg types.
    * @param ctor_args
    *        0 or more args to `T` constructor.
-   * @return Non-null on success; `null` if ctor failed to attach a pool.
+   * @return Non-null on success; `nullptr` if ctor failed to attach a pool.
    */
   template<typename T, typename... Ctor_args>
   Handle<T> construct(Ctor_args&&... ctor_args);
@@ -625,7 +625,7 @@ public:
    *         See lend_object().
    * @param serialization
    *        Value, not `.empty()`, returned by lend_object() and transmitted bit-for-bit to this process.
-   * @return Non-null on success; `null` if ctor failed to attach a pool, or if `serialization` is invalid
+   * @return Non-null on success; `nullptr` if ctor failed to attach a pool, or if `serialization` is invalid
    *         (best-effort check).
    */
   template<typename T>
@@ -635,7 +635,7 @@ public:
    * Returns `true` if and only if `handle` came from either `this->construct<T>()` or `this->borrow_object<T>()`.
    * Another way of saying that is: if and only if `handle` may be passed to `this->lend_object<T>()`.
    * (The words "came from" mean "was returned by or is a copy/move of one that was," or
-   * equivalently "belongs to the `shared_ptr` group of one that was returned by.")
+   * equivalently "belongs to the ref-counting pointer group of one that was returned by.")
    *
    * @param handle
    *        An object, or copy/move of an object, returned by `construct<T>()` or `borrow_object<T>()`
@@ -775,7 +775,7 @@ public:
    *       `flow::util::ostream_op_string(*target_info_dump)`.
    *
    * ### Rationale ###
-   * This is a "get me everything `*this`-arena-related, all in one nicely-printable thing" operation.  For
+   * This is a "get me everything this-arena-related, all in one nicely-printable thing" operation.  For
    * finer-grained access to the same information, use the individual accessors -- arena_stats(), local_stats(),
    * arena_size(), arena_stat_free_size() -- each of which the corresponding stat::Arena_info_dump member documents
    * as its source.  (The stat-sets can also be `<< print(...)`ed individually and post-processed via

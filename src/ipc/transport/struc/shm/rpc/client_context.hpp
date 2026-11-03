@@ -158,7 +158,7 @@ namespace ipc::transport::struc::shm::rpc
  *
  * @tparam Client_session_t
  *         A concrete type a-la session::Client_session but SHM-enabled.  As of this writing
- *         out of the box the available types are listed above under "How to use `Client_context`."
+ *         out of the box the available types are listed above under: How to use Client_context.
  *         Naturally, the opposing Context_server must be parameterized in a compatible fashion.
  *         (E.g., `Client_context<ipc::session::shm::classic::Client_session<...knobs...>>` <=>
  *                `Context_server<ipc::session::shm::classic::Session_server<...same-knobs...>>`.)
