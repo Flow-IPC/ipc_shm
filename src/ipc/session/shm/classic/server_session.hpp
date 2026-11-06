@@ -21,8 +21,11 @@
 #include "ipc/session/shm/classic/classic.hpp"
 #include "ipc/shm/classic/classic.hpp"
 #include "ipc/session/detail/shm/classic/server_session_impl.hpp"
+#include "ipc/session/detail/session_fwd.hpp"
 #include "ipc/session/shm/classic/session.hpp"
 #include "ipc/session/server_session.hpp"
+#include "ipc/transport/struc/shm/shm_fwd.hpp"
+#include "ipc/transport/transport_fwd.hpp"
 #include <boost/move/make_unique.hpp>
 
 namespace ipc::session::shm::classic
@@ -32,7 +35,7 @@ namespace ipc::session::shm::classic
 
 /**
  * Identical to session::Server_session in every way, except that it makes available two SHM arenas, from the
- * SHM-classic provider (ipc::shm::classic::Pool_arena), symmetrically accessible by the opposing side. These
+ * SHM-classic provider (ipc::shm::classic::Pool_arena), symmetrically accessible by the opposing side.  These
  * SHM arenas (see #Arena doc header) have different scopes:
  *   - Per-session-scope, accessible via session_shm(): meaning it shall be accessible only during the lifetime of
  *     this session, by this Session (via this accessor) and the opposing Session (via its counterpart thereof).
@@ -56,8 +59,8 @@ namespace ipc::session::shm::classic
  * transport::Channel or transport::struc::Channel), then recover a handle via borrow_object() on that
  * opposing side.
  *
- * By using `shm::stl::Arena_activator<Arena>` (alias shm::classic::Pool_arena_activator) and
- * #Allocator (alias shm::classic::Pool_arena_allocator) it is possible to construct and transmit not just POD (Plain
+ * By using `shm::stl::Arena_activator<Arena>` (alias shm::classic::Pool_arena::Activator) and
+ * #Allocator (alias shm::classic::Pool_arena::Allocator) it is possible to construct and transmit not just POD (Plain
  * Old Datatype) objects but combinations of those with unlimited nested levels of STL-compliant containers.
  * On the borrowing side use #Borrower_allocator for maximum SHM-provider-independence of your code.  (But see
  * the following note: your algorithm may require features not available in the alternative, SHM-jemalloc,
@@ -84,17 +87,17 @@ namespace ipc::session::shm::classic
  * copied into/out of the low-level transport are merely the SHM handle (and all of this is hidden from the user
  * outside of the delightful near-zero-copy perf properties).
  *
- * There are two ways to make this happen.  The easiest and best way is, when constructing the
- * `struc::Channel`, to use the tag-form ctor with tag
- * transport::struc::Channel_base::Serialize_via_shm_classic.  Simply provide that tag,
- * `this` (or, symmetrically, `shm::classic::Client_session::this` on the other side), and specify which of the
- * 2 scopes you desire (per-session or per-app: a `bool`).
- *
- * The harder way, albeit allowing for certain advanced setups, is to manually create a
- * `transport::struc::shm::classic::Builder::Config` and/or `Reader::Config`,
- * passing in `this->session_shm()` and/or `this->app_shm()`, to those;
- * and then pass the `Config` or `Config`s to the non-tag-form of `struc::Channel`
- * ctor.
+ * There are a few ways to make this happen, including and ranging between the following:
+ *   - Use type alias session::shm::classic::Session_mv::Structured_channel (`Session_mv` is super-class of
+ *     classic::Server_session and classic::Client_session).  To the ctor provide
+ *     either transport::struc::Channel_base::Serialize_via_session_shm or `...Serialize_via_app_shm`
+ *     (thus selecting the scope); and `this` (or `Client_session` counterpart on the other side -- by that
+ *     point they're both conceptually `Session`s).
+ *   - The harder way, albeit allowing for certain advanced setups, is to manually create a
+ *     `transport::struc::shm::classic::Builder::Config` and/or replace `Builder` with `Reader`,
+ *     passing in `this->session_shm()` and/or `this->app_shm()`, to those;
+ *     and then pass the `Config` or `Config`s to the non-tag-form of `struc::Channel`
+ *     ctor.
  *
  * This is all documented on transport::struc::Channel.  Do realize, though, that those niceties are
  * really built on this class template and/or the opposing shm::classic::Client_session.  To use them with
@@ -147,19 +150,20 @@ namespace ipc::session::shm::classic
  * as well, because why not?  However, for a given distinct Client_app, pool has to be *created* only the first time
  * Session_server encounters an instance of the application described by that Client_app; after that it's already
  * created, so no creation is necessary.  Either way, keep the handle around to return in app_shm().
- * However, by definition, a given per-app arena is to stay alive until the entire server (shm::classic::Session_server)
- * is destroyed; resources (including transport::struc::Msg_out) residing in an app_shm()-returned
- * arena stay around potentially over 2+ sessions and can be shared via any of them (as long as they apply to
- * the same Client_app).  Because of this more-than-session lifetime, the app_shm()-returned arenas are actually tracked
- * in the parent shm::classic::Session_server; it uses one of the Session_server_impl customization points to
- * create the per-Client_app arena as needed at just the right moment during the log-in process; then
- * the shm::classic::Server_session_impl saves that pointer for quick return via `this->app_shm()`.
+ * However, by definition, a given per-app arena is to stay alive at least until the entire server
+ * (shm::classic::Session_server) is destroyed; resources (including transport::struc::Msg_out) residing in an
+ * app_shm()-returned arena stay around potentially over 2+ sessions and can be shared via any of them (as long as
+ * they apply to the same Client_app).  Because of this more-than-session lifetime, the app_shm()-returned arenas are
+ * actually tracked in the parent shm::classic::Session_server; it uses one of the Session_server_impl customization
+ * points to create the per-Client_app arena as needed at just the right moment during the log-in process; then
+ * the shm::classic::Server_session_impl saves a shared handle to it for quick return via `this->app_shm()` (hence
+ * the arena lives until the server and every such session are gone).
  * The same arena can also be accessed from the central store via shm::classic::Session_server::app_shm()
  * (which takes a `const Client_app&` and looks it up in an internal map).
  *
  * Other than that, per-app-scope arenas are created and remembered similarly to per-session-scope ones:
  * create (centrally across server-sessions, on-demand) in `CREATE_ONLY` mode; retain (in each relevant
- * server-session) a pointer for return via `this->app_shm()`.  See shm::classic::Server_session_impl doc header
+ * server-session) a shared handle for return via `this->app_shm()`.  See shm::classic::Server_session_impl doc header
  * and code inside shm::classic::Server_session_impl::async_accept_log_in().
  *
  * So then to recap:
@@ -205,17 +209,17 @@ namespace ipc::session::shm::classic
  *
  * @endinternal
  *
- * @tparam S_MQ_TYPE_OR_NONE
+ * @tparam MQ_TYPE_OR_NONE
  *         Identical to session::Server_session.
- * @tparam S_TRANSMIT_NATIVE_HANDLES
+ * @tparam TRANSMIT_NATIVE_HANDLES
  *         Identical to session::Server_session.
  * @tparam Mdt_payload
  *         Identical to session::Server_session.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 class Server_session :
   public Session_mv<session::Server_session_mv
-                      <Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>
+                      <Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>
 {
 public:
   // Types.
@@ -223,14 +227,35 @@ public:
   /// Short-hand for our base class.  To the user: note its `public` API is inherited.
   using Base = Session_mv
                  <session::Server_session_mv
-                    <Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>;
+                    <Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>;
+
+  /// Short-hand for base class member alias Session_mv::Arena.  Its doc header contains useful context and tips.
+  using Arena = typename Base::Arena;
+
+  /**
+   * Server_session::Vat_network and `Client_session::Vat_network` are reasonable concrete types
+   * of template transport::struc::shm::rpc::Session_vat_network for an ipc::session user to use on opposing
+   * sides of a session; use the mainstream-form ctor to straightforwardly construct your zero-copy-enabled
+   * `Vat_network` (from a `*this`) for blazing-fast capnp-RPC.
+   */
+  using Vat_network = transport::struc::shm::rpc::Session_vat_network<Server_session, Arena>;
+
+  /// You may disregard.
+  using Async_io_obj = transport::Null_peer;
+  /// Useful for generic programming, the `sync_io`-pattern counterpart to `*this` type.
+  using Sync_io_obj = sync_io::Server_session_adapter<Server_session>;
+
+  // Constants.
+
+  /// Implements Session API per contract: equals `true`.
+  static constexpr bool S_IS_SRV_ELSE_CLI = Base::S_IS_SRV_ELSE_CLI;
 
   // Constructors/destructor.
 
   /// Inherit default, move ctors.
   using Base::Base;
 
-protected:
+private:
   // Constructors.
 
   /**
@@ -253,10 +278,10 @@ protected:
 
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define TEMPLATE_CLSC_SRV_SESSION \
-  template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+  template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define CLASS_CLSC_SRV_SESSION \
-  Server_session<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>
+  Server_session<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>
 
 TEMPLATE_CLSC_SRV_SESSION
 CLASS_CLSC_SRV_SESSION::Server_session(flow::log::Logger* logger_ptr, const Server_app& srv_app_ref_arg,

@@ -21,8 +21,10 @@
 /**
  * ipc::session sub-namespace that groups together facilities for SHM-backed sessions, particularly augmenting
  * #Client_session, #Server_session, and Session_server classes by providing SHM-backed zero-copy functionality.
- * ipc::session::shm is itself empty or almost empty; but for each possible SHM provider there is a further
+ * ipc::session::shm is itself empty or almost empty; but for each possible SHM-provider there is a further
  * sub-namespace; for example ipc::session::shm::classic.
+ *
+ * @see The guided Manual chapters @ref chan_struct_advanced and @ref transport_shm cover SHM-backed sessions in use.
  *
  * ### Background ###
  * ipc::shm provides SHM facilities, including ipc::shm::classic and ipc::shm::arena_lend::jemalloc, that can be used
@@ -85,9 +87,9 @@
  *   // Off we go!  Use the types as needed.
  *
  *   // ...
- *   Session session(...); // Maybe .sync_connect() following this.
+ *   Session session{...}; // Maybe .sync_connect() following this.
  *   // ...
- *   Structured_channel<MessageSchemaRootOfTheGods> cool_channel(...);
+ *   Structured_channel<MessageSchemaRootOfTheGods> cool_channel{...};
  *   // ...
  *   ~~~
  *
@@ -107,7 +109,7 @@
  *     - This enables manually-constructing structures and transmitting them from one session participant to the
  *       other.
  *     - On the borrower side one should define `T` in terms of `"Session::Borrower_allocator"` instead of
- *       `"Session::Allocator"`.  (With SHM-classic they are the same type; but with arena-lending SHM providers,
+ *       `"Session::Allocator"`.  (With SHM-classic they are the same type; but with arena-lending SHM-providers,
  *       SHM-jemalloc at the moment, they are not.)
  *   - Suppose you have opened a channel C between your two peer objects.  Suppose you upgrade it to a
  *     transport::struc::Channel.  Without SHM, your only out-of-the-box choice for out-message serialization
@@ -131,21 +133,26 @@
  * shm::arena_lend::jemalloc::Client_session -- available only shm::arena_lend::jemalloc::Server_session); there's
  * no such method as `shm::arena_lend::jemalloc::Client_session::app_shm()`.
  *
- * ### One more small thing: logging addendum for SHM-jemalloc users ###
+ * ### One more small thing: logging addendum for SHM-arena-lend users ###
  * This is really a footnote in importance, though there's no good reason to ignore it either.
- * A certain aspect of SHM-jemalloc (and potentially more future arena-lending-type SHM-providers) requires
+ * Certain aspects of SHM-jemalloc (and potentially more future arena-lending-type SHM-providers) require
  * singleton-based (essentially, global) operation.  You need not worry about it... it just works... except
- * it (like all Flow-IPC code) logs; and thus needs to know to which `Logger` to log.  Since various ipc::session
- * objects don't want to presume whose `Logger` is the one to impose on this shared global guy -- plus the
- * setter is not thread-safe -- we ask that you do so sometime before any ipc::session::arena_lend object creation.
+ * it (like ~all Flow-IPC code) logs; and thus needs to know to which `Logger` to log.  Since various ipc::session
+ * objects don't want to presume whose `Logger` is the one to impose on these shared global singletons, we ask
+ * that you do so sometime before any ipc::session::arena_lend object creation.
  * Namely just do this:
  *
  *   ~~~
- *   ipc::session::shm::arena_lend::Borrower_shm_pool_collection_repository_singleton::get_instance()
- *     .set_logger(...); // ... = pointer to your Logger of choice.  Null to disable logging (which is default anyway).
+ *   ipc::shm::arena_lend::set_logger(&my_logger); // Before creating sessions.
+ *   // ... application runs ...
+ *   ipc::shm::arena_lend::set_logger(nullptr);    // Before Logger is destroyed.
  *   ~~~
  *
- * If SHM-jemalloc is not used, this call is harmless.
+ * This fans out to all arena-lend singletons via the `flow::util::Action_registry` mechanism.
+ * If SHM-arena-lend is not used, this call is harmless (no singletons will have registered).
+ *
+ * If you don't, then these particular modules won't log.  That could also be fine; but if you are log-enabling
+ * everything else, starting with `Session`s and `Session_server`s in ipc::session, then this equally deserves it.
  */
 namespace ipc::session::shm
 {

@@ -18,6 +18,7 @@
 /// @file
 #include "ipc/transport/struc/shm/error.hpp"
 #include "ipc/util/util_fwd.hpp"
+#include <flow/util/util.hpp>
 
 namespace ipc::transport::struc::shm::error
 {
@@ -47,7 +48,7 @@ public:
   const char* name() const noexcept override;
 
   /**
-   * Analogous to transport::error::Category::name().
+   * Analogous to transport::error::Category::message().
    *
    * @param val
    *        See above.
@@ -56,7 +57,7 @@ public:
   std::string message(int val) const override;
 
   /**
-   * Analogous to transport::error::Category::name().
+   * Analogous to transport::error::Category::code_symbol().
    * @param code
    *        See above.
    * @return See above.
@@ -80,7 +81,7 @@ Error_code make_error_code(Code err_code)
 {
   /* Assign Category as the category for flow::error::Code-cast error_codes;
    * this basically glues together Category::name()/message() with the Code enum. */
-  return Error_code(static_cast<int>(err_code), Category::S_CATEGORY);
+  return {static_cast<int>(err_code), Category::S_CATEGORY};
 }
 
 Category::Category() = default;

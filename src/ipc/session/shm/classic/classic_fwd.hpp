@@ -25,7 +25,7 @@
  * Support for SHM-backed ipc::session sessions and session-servers with the SHM-classic
  * (ipc::shm::classic::Pool_arena) provider.  See the doc header for the general ipc::session::shm namespace.
  */
-namespace ipc::session::shm::classic
+namespace ipc::session::shm::classic // See also ipc::session::shm::classic::rpc {} lower down.
 {
 
 // Types.
@@ -35,15 +35,10 @@ namespace ipc::session::shm::classic
 template<typename Session_t>
 class Session_mv;
 
-template<typename Server_session_impl_t>
-class Server_session_mv;
-template<typename Client_session_impl_t>
-class Client_session_mv;
-
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
 class Server_session;
 
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
 class Session_server;
 
 /**
@@ -52,15 +47,18 @@ class Session_server;
  * view, this class template alias is simply ~exactly identical/symmetrical to shm::classic::Server_session.
  * See its doc header.  That is during PEER state.
  *
+ * @warning See same-named section of session::Client_session_mv ctor doc header.  In short: the `Client_app`
+ *          and `Server_app` passed to the ctor must outlive `*this`.
+ *
  * The only difference is shm::classic::Server_session::app_shm() and `shm::classic::Client_session::app_shm()`
  * (actually Session_mv::app_shm() = both) differ in terms of how one views the lifetime of the
  * underlying SHM areas.  This is reflected in the latter's doc header.
- * Essentially, though, the `Arena*` returned by the former can be used beyond
- * the returning `*this` being destroyed, as long as its parent shm::classic::Session_server is alive (which
- * is typical).  In contrast that is not true of that returned by `shm::classic::Client_session::app_shm()`; but
- * since the destruction of a #Client_session implies either the process is itself going down, or the
- * opposing server process (and thus shm::classic::Session_server) is going down/has gone down, this should not
- * be relevant, as those objects should never be accessed again anyway.
+ * Essentially, though, the `Arena*` returned by the former can be used beyond the returning `*this` being destroyed,
+ * as long as its parent shm::classic::Session_server -- or another shm::classic::Server_session from it, with the
+ * same Client_app -- is alive (which is typical).  In contrast that is not true of that returned by
+ * `shm::classic::Client_session::app_shm()`; but since the destruction of a #Client_session implies either the
+ * process is itself going down, or the opposing server process (and thus shm::classic::Session_server) is going
+ * down/has gone down, this should not be relevant, as those objects should never be accessed again anyway.
  *
  * @internal
  * ### Implementation ###
@@ -86,18 +84,18 @@ class Session_server;
  * Just see same spot in shm::classic::Server_session doc header; it explains both client and server sides.
  * @endinternal
  *
- * @tparam S_MQ_TYPE_OR_NONE
+ * @tparam MQ_TYPE_OR_NONE
  *         Identical to session::Client_session.
- * @tparam S_TRANSMIT_NATIVE_HANDLES
+ * @tparam TRANSMIT_NATIVE_HANDLES
  *         Identical to session::Client_session.
  * @tparam Mdt_payload
  *         Identical to session::Client_session.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload = ::capnp::Void>
 using Client_session
   = Session_mv
       <session::Client_session_mv
-        <Client_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>;
+        <Client_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>>>;
 
 // Free functions.
 
@@ -126,11 +124,11 @@ std::ostream& operator<<(std::ostream& os, const Session_mv<Session_t>& val);
  *        Object to serialize.
  * @return `os`.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES,
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES,
          typename Mdt_payload>
 std::ostream& operator<<(std::ostream& os,
                          const Server_session
-                                 <S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>& val);
+                                 <MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>& val);
 
 /**
  * Prints string representation of the given `Session_server` to the given `ostream`.
@@ -143,10 +141,66 @@ std::ostream& operator<<(std::ostream& os,
  *        Object to serialize.
  * @return `os`.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES,
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES,
          typename Mdt_payload>
 std::ostream& operator<<(std::ostream& os,
                          const Session_server
-                                 <S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>& val);
+                                 <MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>& val);
 
 } // namespace ipc::session::shm::classic
+
+/**
+ * Sub-namespace containing utilities useful when working with capnp-RPC-with-zero-copy module of Flow-IPC
+ * (transport::struc::shm::rpc) -- assuming one has chosen SHM-classic as the SHM-provider for such work.
+ */
+namespace ipc::session::shm::classic::rpc
+{
+
+// Types.
+
+/**
+ * Having decided to use SHM-classic SHM-provider: Suitable template argument for
+ * transport::struc::shm::rpc::Client_context, or more generally a suitable session::Client_session for
+ * transport::struc::shm::rpc::Session_vat_network.
+ *
+ * @tparam S_MQ_TYPE_OR_NONE
+ *         Whether you want the session to include a transport::Persistent_mq_handle (MQ) pipe; and if so
+ *         what kind.  The default `NONE` is best, unless you specifically intend to create side channel(s)
+ *         in addition to the one used for the central capnp-RPC session; in the latter case choose the one
+ *         that fits your performance needs best.
+ *
+ * @internal
+ * ### Rationale ###
+ * Why this value for the alias and the ones nearby?
+ *   - By definition it must be a session::Client_session variant that is SHM-enabled.
+ *   - transport::struc::shm::rpc::Client_context (et al), by its internal protocol, sends a native handle --
+ *     the stream-socket underlying the capnp-RPC conversation -- over the first init-channel; so specifying
+ *     `true` there is required, guaranteeing the session will produce Native_handle-bearing channel(s).
+ *   - An additional MQ-based pipe *might* be useful for user's side channels (if any), so `NONE` is default, but
+ *     they can choose an actual MQ type instead.
+ */
+template<session::schema::MqType S_MQ_TYPE_OR_NONE = session::schema::MqType::NONE>
+using Client_session = classic::Client_session<S_MQ_TYPE_OR_NONE, true>;
+
+/**
+ * Having decided to use SHM-classic SHM-provider: Suitable template argument for
+ * transport::struc::shm::rpc::Context_server, or more generally a suitable session::Session_server for
+ * generating `Session`s in use with transport::struc::shm::rpc::Session_vat_network.
+ *
+ * @tparam S_MQ_TYPE_OR_NONE
+ *         See #Client_session.
+ */
+template<session::schema::MqType S_MQ_TYPE_OR_NONE = session::schema::MqType::NONE>
+using Session_server = classic::Session_server<S_MQ_TYPE_OR_NONE, true>;
+
+/**
+ * Having decided to use SHM-classic SHM-provider: Generally a suitable session::Server_session for
+ * transport::struc::shm::rpc::Session_vat_network.
+ *
+ * @tparam S_MQ_TYPE_OR_NONE
+ *         See #Client_session.
+ */
+template<session::schema::MqType S_MQ_TYPE_OR_NONE = session::schema::MqType::NONE>
+using Server_session = classic::Server_session<S_MQ_TYPE_OR_NONE, true>;
+
+} // namespace ipc::session::shm::classic::rpc

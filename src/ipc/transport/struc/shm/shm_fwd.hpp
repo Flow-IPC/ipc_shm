@@ -19,6 +19,8 @@
 #pragma once
 
 #include "ipc/transport/struc/shm/schema/common.capnp.h"
+#include "ipc/transport/struc/struc_fwd.hpp"
+#include "ipc/util/native_handle.hpp"
 #include <flow/util/basic_blob.hpp>
 
 // Types.
@@ -29,6 +31,8 @@
  * and items related to them.  This namespace proper is focused on struc::shm::Builder and struc::shm::Reader,
  * templates which enable (in a SHM-provider-parameterized way) zero-copyable structured messages by implementing
  * the aforementioned pair of concepts respectively.
+ *
+ * @see The guided Manual chapters @ref chan_struct and @ref chan_struct_advanced cover zero-copy structured transport.
  *
  * Sub-namespaces, including struc::shm::classic and struc::shm::arena_lend::jemalloc as of this writing,
  * pertain to SHM-provider-specific items relevant (at least) to that pair of templates (`Builder` and `Reader`).
@@ -45,7 +49,7 @@
  * ipc::session::shm::classic::Session_mv::Structured_channel is your guy... no `Builder`s or `Reader`s in sight
  * about which you would need to worry.)
  */
-namespace ipc::transport::struc::shm
+namespace ipc::transport::struc::shm // See also ipc::transport::struc::shm::stat {} lower down.
 {
 
 // Types.
@@ -55,18 +59,20 @@ namespace ipc::transport::struc::shm
 class Builder_base;
 template<typename Shm_arena>
 class Builder;
-
 template<typename Shm_arena>
 class Reader;
-
 template<typename Shm_arena>
 class Capnp_message_builder;
+
+template<typename Shm_arena>
+class Capnp_message_reader;
 
 // Free functions.
 
 /**
- * Utility that saves the result of a `Shm_session1::lend_object<T>(const shared_ptr<T>&)` result into
- * the given capnp-generated `ShmHandle`-typed field.  On the deserializing end, one
+ * Utility that saves the result of a `Shm_session1::lend_object<T>(const shared_ptr<T>&)` into
+ * the given capnp-generated struct's `shmHandleSerialization :Data` field -- typically a `ShmHandle`-typed field
+ * in your schema.  On the deserializing end, one
  * can get back this value via capnp_get_shm_handle_to_borrow() and pass it to
  * `Shm_session2::borrow_object<T>()` to yield a `shared_ptr<T>` equivalent to the original passed to `lend_object()`.
  *
@@ -79,26 +85,38 @@ class Capnp_message_builder;
  *     - vice versa;
  *   - shm::Builder::Session pointee, shm::Reader::Session pointee.
  *
+ * It is fine to call this repeatedly on the same `*shm_handle_root` (e.g., when re-sending the same message):
+ * the already-allocated `Data` is reused rather than orphaned (capnp `initX()` does not reuse space).
+ *
+ * @tparam Capnp_root_builder
+ *         Capnp-generated `X::Builder`, where `struct X` declares field `shmHandleSerialization :Data`.
+ *         The typical one is `schema::ShmHandle::Builder`, `ShmHandle` being the public convenience type for
+ *         this purpose; but any struct with such a field works (Flow-IPC internally uses this on certain hot-path
+ *         header structs, where the field sits directly among other fields, saving a level of nesting).
  * @param shm_handle_root
- *        Non-null (or behavior undefined/assertion may trip) pointer to `ShmHandle` builder to mutate.
+ *        Non-null (or behavior undefined/assertion may trip) pointer to builder to mutate.
  * @param lend_result
  *        What `lend_object<T>()` returned.  Not `.empty()`, or behavior undefined (assertion may trip).
  *        Reminder: if that returned `.empty()`, the session is likely hosed, and you cannot transmit SHM objects
  *        between the two endpoints, so there is no point in calling us.
  */
-void capnp_set_lent_shm_handle(schema::ShmHandle::Builder* shm_handle_root,
+template<typename Capnp_root_builder>
+void capnp_set_lent_shm_handle(Capnp_root_builder* shm_handle_root,
                                const flow::util::Blob_sans_log_context& lend_result);
 
 /**
  * Utility that's the reverse of capnp_set_lent_shm_handle() to be invoked on the deserializing side.
  *
+ * @tparam Capnp_root_reader
+ *         Capnp-generated `X::Reader` counterpart to the `Capnp_root_builder` given to capnp_set_lent_shm_handle().
  * @param shm_handle_root
- *        `ShmHandle` reader to access.  Behavior undefined if was not set by capnp_set_lent_shm_handle().
+ *        Reader to access.  Behavior undefined if was not set by capnp_set_lent_shm_handle().
  * @param arg_to_borrow
  *        Shall be set to what to pass to `borrow_object<T>()` (non-null pointer or behavior undefined/assertion
  *        may trip).  `arg_to_borrow->get_logger()` shall not be modified; so set it to what you want, if you want.
  */
-void capnp_get_shm_handle_to_borrow(const schema::ShmHandle::Reader& shm_handle_root,
+template<typename Capnp_root_reader>
+void capnp_get_shm_handle_to_borrow(const Capnp_root_reader& shm_handle_root,
                                     flow::util::Blob_sans_log_context* arg_to_borrow);
 
 /**
@@ -143,4 +161,111 @@ std::ostream& operator<<(std::ostream& os, const Reader<Shm_arena>& val);
 template<typename Shm_arena>
 std::ostream& operator<<(std::ostream& os, const Capnp_message_builder<Shm_arena>& val);
 
+/**
+ * Prints string representation of the given `Capnp_message_reader` to the given `ostream`.
+ *
+ * @relatesalso Capnp_message_reader
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+template<typename Shm_arena>
+std::ostream& operator<<(std::ostream& os, const Capnp_message_reader<Shm_arena>& val);
+
 } // namespace ipc::transport::struc::shm
+
+/// Stats-related sub-namespace, for ADL segregation and general organization.
+namespace ipc::transport::struc::shm::stat
+{
+
+// Types.
+
+// Find doc headers near the bodies of these compound types.
+
+struct Outer_serializer_stats_cfg;
+struct Core_serializer_stats_cfg;
+struct Serializer_info_dump;
+template<typename Arena>
+struct Shm_msg_outer_tag;
+
+/**
+ * Default-constructible Serializer_stats variant for the heap-side outer envelope of a SHM-backed
+ * message.  See Serializer_stats doc header.
+ */
+using Outer_serializer_stats = struc::stat::Serializer_stats_p<Outer_serializer_stats_cfg>;
+
+/**
+ * Default-constructible Serializer_stats variant for the SHM-side payload of a SHM-backed message.
+ * See Serializer_stats doc header.
+ */
+using Core_serializer_stats = struc::stat::Serializer_stats_p<Core_serializer_stats_cfg>;
+
+/**
+ * SHM-msg-outer (heap-side envelope) cumulative-#Outer_serializer_stats singleton: convenience
+ * alias for the `flow::util::stat::Global_stats` instantiated with Shm_msg_outer_tag,
+ * per-`Arena`.
+ *
+ * @tparam Arena
+ *         See #Core_serializer_global_stats.
+ */
+template<typename Arena>
+using Outer_serializer_global_stats
+  = flow::util::stat::Global_stats<Shm_msg_outer_tag<Arena>, Outer_serializer_stats, 1>;
+
+/**
+ * SHM-msg-inner (SHM-resident user payload) cumulative-#Core_serializer_stats singleton:
+ * convenience alias for the `flow::util::stat::Global_stats` instantiated with the `Arena`
+ * type itself as tag.
+ *
+ * @tparam Arena
+ *         A particular SHM-provider's arena type: the guy with `Arena::construct<T>(...)`.
+ *         Accessible, among other ways, as eponymous alias in SHM-enabled `Session`; so
+ *         for example for SHM-classic and SHM-jemalloc that's
+ *         session::shm::classic::Session_mv::Arena (resolves to shm::classic::Pool_arena) and
+ *         session::shm::arena_lend::jemalloc::Session_mv::Arena (resolves to
+ *         shm::arena_lend::jemalloc::Ipc_arena) respectively.
+ */
+template<typename Arena>
+using Core_serializer_global_stats
+  = flow::util::stat::Global_stats<Arena, Core_serializer_stats, 1>;
+
+// Free functions.
+
+/**
+ * Grabs a snapshot of *everything in serializer global-land* -- for the given SHM-provider `Arena` -- into
+ * `*target_info_dump` which can then be read/printed/aggregated at leisure.  That is (see Serializer_info_dump):
+ * the pure-heap, SHM-msg-outer, and SHM-msg-core global serializer stat-sets (3 singletons).
+ *
+ * If your application uses two SHM-providers (unusual), call this once per `Arena` type; note the
+ * `m_heap` part shall be redundant between the two results.
+ *
+ * (This does not affect any serializer object that has been redirected -- via the relevant builder/reader config
+ * knobs -- to accumulate into a custom `Serializer_stats` instead of the relevant default global.)
+ *
+ * @tparam Arena
+ *         See #Core_serializer_global_stats.
+ * @param target_info_dump
+ *        The stats are assigned here (via `flow::util::stat::stats_assign()`).  Must not be null.
+ */
+template<typename Arena>
+void serializer_info_dump(Serializer_info_dump* target_info_dump);
+
+/**
+ * Prints the entire Serializer_info_dump stats bundle to the given `ostream`, formatted per `val.m_fmt`
+ * (see Serializer_info_dump doc header).
+ *
+ * @relatesalso Serializer_info_dump
+ *
+ * @param os
+ *        Stream to which to write.
+ * @param val
+ *        Object to serialize.
+ * @return `os`.
+ */
+std::ostream& operator<<(std::ostream& os, const Serializer_info_dump& val);
+
+} // namespace ipc::transport::struc::shm::stat
+

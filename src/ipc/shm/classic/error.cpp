@@ -18,6 +18,7 @@
 /// @file
 #include "ipc/shm/classic/error.hpp"
 #include "ipc/util/util_fwd.hpp"
+#include <flow/util/util.hpp>
 
 namespace ipc::shm::classic::error
 {
@@ -25,7 +26,7 @@ namespace ipc::shm::classic::error
 // Types.
 
 /**
- * The boost.system category for errors returned by the ipc::shm module.  Analogous to
+ * The boost.system category for errors returned by the ipc::shm::classic module.  Analogous to
  * transport::error::Category.  All notes therein apply.
  */
 class Category :
@@ -47,7 +48,7 @@ public:
   const char* name() const noexcept override;
 
   /**
-   * Analogous to transport::error::Category::name().
+   * Analogous to transport::error::Category::message().
    *
    * @param val
    *        See above.
@@ -56,7 +57,7 @@ public:
   std::string message(int val) const override;
 
   /**
-   * Analogous to transport::error::Category::name().
+   * Analogous to transport::error::Category::code_symbol().
    * @param code
    *        See above.
    * @return See above.
@@ -80,14 +81,14 @@ Error_code make_error_code(Code err_code)
 {
   /* Assign Category as the category for flow::error::Code-cast error_codes;
    * this basically glues together Category::name()/message() with the Code enum. */
-  return Error_code(static_cast<int>(err_code), Category::S_CATEGORY);
+  return {static_cast<int>(err_code), Category::S_CATEGORY};
 }
 
 Category::Category() = default;
 
 const char* Category::name() const noexcept // Virtual.
 {
-  return "ipc/shm";
+  return "ipc/shm/classic";
 }
 
 std::string Category::message(int val) const // Virtual.
@@ -102,6 +103,11 @@ std::string Category::message(int val) const // Virtual.
   case Code::S_SHM_BIPC_MISC_LIBRARY_ERROR:
     return "Low-level boost.ipc.shm: boost.interprocess emitted miscellaneous library exception sans a system code; "
            "a WARNING message at throw-time should contain all possible details.";
+  case Code::S_SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT:
+    return "SHM-classic pool/arena, requested to be opened in native read-only mode, was found by name, but its "
+           "internal setup had not been completed (e.g., the creating op was still in progress); so the pool-open "
+           "failed.  The contract requires completing the pool-create op before a read-only pool-open.  Violating "
+           "it can instead cause undefined behavior: this error means only that a violation was detected this time.";
 
   case Code::S_END_SENTINEL:
     assert(false && "SENTINEL: Not an error.  "
@@ -119,6 +125,8 @@ util::String_view Category::code_symbol(Code code) // Static.
   {
   case Code::S_SHM_BIPC_MISC_LIBRARY_ERROR:
     return "SHM_BIPC_MISC_LIBRARY_ERROR";
+  case Code::S_SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT:
+    return "SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT";
 
   case Code::S_END_SENTINEL:
     return "END_SENTINEL";

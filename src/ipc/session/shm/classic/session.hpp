@@ -20,6 +20,9 @@
 
 #include "ipc/shm/classic/classic.hpp"
 #include "ipc/shm/stl/stateless_allocator.hpp"
+#include "ipc/transport/struc/shm/shm_fwd.hpp"
+#include "ipc/transport/struc/shm/rpc/rpc_fwd.hpp"
+#include "ipc/transport/transport_fwd.hpp"
 
 namespace ipc::session::shm::classic
 {
@@ -107,29 +110,47 @@ public:
   using Borrower_allocator
     = ipc::shm::stl::Stateless_allocator<T, ipc::shm::Arena_to_borrower_allocator_arena_t<Arena>>;
 
-  /**
-   * Implements Session API per contract.
-   * @see Session::Structured_channel: implemented concept.
-   */
+  /// Implements Session API per contract.
   template<typename Message_body>
   using Structured_channel
     = typename transport::struc::shm::classic::Channel<typename Base::Base::Impl::Session_base_obj::Channel_obj,
                                                        Message_body>;
 
-  /**
-   * Implements Session API per contract.
-   * @see Session::Structured_msg_builder_config: implemented concept.
-   */
+  /// Implements Session API per contract.
   using Structured_msg_builder_config = typename Base::Base::Impl::Structured_msg_builder_config;
 
-  /**
-   * Implements Session API per contract.
-   * @see Session::Structured_msg_reader_config: implemented concept.
-   */
+  /// Implements Session API per contract.
   using Structured_msg_reader_config = typename Base::Base::Impl::Structured_msg_reader_config;
 
   /// Alias for a light-weight blob used in borrow_object() and lend_object().
   using Blob = typename Base::Base::Impl::Blob;
+
+  /**
+   * Server_session::Vat_network and `Client_session::Vat_network` are reasonable concrete types
+   * of template transport::struc::shm::rpc::Session_vat_network for an ipc::session user to use on opposing
+   * sides of a session; use the mainstream-form ctor to straightforwardly construct your zero-copy-enabled
+   * `Vat_network` (from a `*this`) for blazing-fast capnp-RPC.
+   */
+  using Vat_network = transport::struc::shm::rpc::Session_vat_network<Session_mv, Arena>;
+
+  /// You may disregard.
+  using Async_io_obj = transport::Null_peer;
+  /**
+   * Useful for generic programming, the `sync_io`-pattern counterpart to `*this` type.
+   *
+   * @internal
+   * @todo The impl for alias classic::Client_session::Sync_io_obj is hacky and should be reconsidered, even
+   * though in practice it works more or less.  Just `Client_session` is an alias to `Session_mv` parameterized
+   * a certain way, so the alias is defined inside `Session_mv` and is written in terms of `Client_session_adapter`
+   * due to knowing this fact.  Maybe classic::Client_session should be a thin wrapper instead of an alias,
+   * but that's a ton of lines for such a small thing... or maybe some `rebind` craziness would work....
+   */
+  using Sync_io_obj = sync_io::Client_session_adapter<Session_mv>;
+
+  // Constants.
+
+  /// Implements Session API per contract.
+  static constexpr bool S_IS_SRV_ELSE_CLI = Base::S_IS_SRV_ELSE_CLI;
 
   // Constructors/destructor.
 
@@ -158,7 +179,7 @@ public:
    * Long story short (though reading the *server* section just below will provide context/background if needed):
    *   - `this->app_shm()` always returns `&A`, where `A` is an #Arena.  No other object returns the same
    *     `&A`.
-   *   -`A` can be accessed until `*this` session is destroyed.  It is impromper (behavior undefined), for code
+   *   - `A` can be accessed until `*this` session is destroyed.  It is improper (behavior undefined), for code
    *     in this process, to access any objects residing in SHM areas `A` past that point.
    *
    * To expand somewhat: A `Client_session` dies for one of two reasons if used properly.  One, locally triggered:
@@ -166,8 +187,8 @@ public:
    * if it's done with IPC, it's done with SHM in this context.  Two, triggered by opposing side
    * (`Server_session`).  That means *that* process is done with IPC (probably planning to terminate gracefully).
    * In that case it's also moot: per-app-scope, or any scope maintained by ipc::session, does not (by definition)
-   * outlive the `Session_server`; and `Session_server` dying is the standard cause of a `Server_session`
-   * being destroyed from a server-local trigger.
+   * outlive the server *process*; and a server-local trigger for destroying a `Server_session` normally means that
+   * process is winding down its `Session_server` too.
    *
    * In other words: from a *client* point of view, app_shm() and session_shm() are not qualitatively different;
    * they both exist and are mutually segregated, but that's it.  Their lifetimes in a given *client* are the same.
@@ -193,7 +214,7 @@ public:
    * but we digress; basically its lifetime extends to the end of the "parent" server's).
    *
    * It is not quite as simple as that, though.  The actual RAM is given-back to the OS only once (1) the
-   * aforementioned *removal* has occured; *and* (2) every #Arena in every process that is open w/r/t that
+   * aforementioned *removal* has occurred; *and* (2) every #Arena in every process that is open w/r/t that
    * same pool has been destroyed (even if its dtor does not run due to abrupt exit, OS will clean it up;
    * but again we digress; just think of it as destroyed via `Arena::~Arena()`).  That is: Each #Arena
    * is a pool *handle*, and they are tracked by the OS in ref-count fashion cross-process; once they all go away,
@@ -205,15 +226,16 @@ public:
    * mere existence of extant #Arena objects in any process.  Given that, here are more facts:
    *   - `this->app_shm()` always returns `&A`, where `A` is an #Arena.
    *     In fact it returns `X.app_shm(C)`, where `C` is the Client_app pertaining to `*this`, and
-   *     `X` is the shm::classic::Server_session whose shm::classic::Session_server::async_accept() loaded `*this`.
+   *     `X` is the shm::classic::Session_server whose async_accept() loaded `*this`.
    *     shm::classic::Session_server::app_shm() doc header states that it always returns the same non-null value
    *     until `X`'s destruction.
    *     - Thus `Y.app_shm()` (where `Y` is any shm::classic::Server_session coming from the same `X`,
    *       and with the same Server_session_mv::client_app()) also always returns `&A`,
    *       and the `A` is that very same #Arena again.
-   *   -`A` can be accessed until the server object `X` (whose `X.async_accept()` yielded the contents of `*this`)
-   *     is destroyed.  It is impromper (behavior undefined) for code in this process to access any objects
-   *     residing in SHM areas `A` past that point.
+   *   - `A` can be accessed until the server object `X` (whose `X.async_accept()` yielded the contents of `*this`)
+   *     is destroyed -- or, if later, until the last shm::classic::Server_session from `X` with this Client_app is
+   *     destroyed: each holds a handle to `A`.  It is improper (behavior undefined) for code in this process to
+   *     access any objects residing in SHM areas `A` past that point.
    *     - However, crucially, it is both proper and intended that `A` (along with objects residing therein) is used
    *       across 1+ `shm::classic::Server_session`s sharing the same Client_app, all the way up to the death
    *       of the parent `Session_server`.
@@ -240,7 +262,7 @@ public:
    * It is the user's responsibility to transmit the returned blob, such as via a transport::Channel,
    * to the owning process.  Failing to do so will leak the object until arena cleanup.  (Arena cleanup time
    * depends on the source #Arena.  If it came from session_shm(), arena cleanup occurs at Session destruction.
-   * If from app_shm(), arena cleanup occurs at Server_session destruction.  If a destructor does not run, due to
+   * If from app_shm(), arena cleanup occurs at Session_server destruction.  If a destructor does not run, due to
    * crash/etc., then the leaked ipc::session-managed `Arena`s' pools are cleaned the next time a Session_server
    * is constructed.)
    *
@@ -252,7 +274,7 @@ public:
    * E.g., shm::arena_lend::jemalloc::Server_session::lend_object() does not, and cannot (as it does not exist), call
    * any `Arena::lend_object()`.
    *
-   * However, if your code specifically counts on `*this` being a shm::classic::Server_session, then it is not wrong
+   * However, if your code specifically counts on `*this` being a shm::classic::Session_mv, then it is not wrong
    * to rely on this knowledge.
    *
    * @tparam T
@@ -267,7 +289,7 @@ public:
   Blob lend_object(const typename Arena::template Handle<T>& handle);
 
   /**
-   * Completes the cross-process operation begun by oppsing Session_mv::lend_object() that returned `serialization`;
+   * Completes the cross-process operation begun by opposing Session_mv::lend_object() that returned `serialization`;
    * to be invoked in the intended new owner process which is operating `*this`.
    *
    * @tparam T
@@ -282,9 +304,13 @@ public:
 
   /**
    * Returns builder config suitable for capnp-serializing out-messages in SHM arena session_shm().
+   * @param segment1_sz
+   *        See eponymous arg to, say, transport::struc::sync_io::Channel ctor with `Serialize_via_session_shm` tag.
    * @return See above.
    */
-  Structured_msg_builder_config session_shm_builder_config();
+  Structured_msg_builder_config
+    session_shm_builder_config(size_t segment1_sz
+                                        = sizeof(::capnp::word) * ::capnp::SUGGESTED_FIRST_SEGMENT_WORDS);
 
   /**
    * When transmitting items originating in #Arena session_shm() via
@@ -309,9 +335,13 @@ public:
 
   /**
    * Identical to session_shm_builder_config() but backed by SHM arena app_shm() instead of session_shm().
+   * @param segment1_sz
+   *        See eponymous arg to, say, transport::struc::sync_io::Channel ctor with `Serialize_via_app_shm` tag.
    * @return See above.
    */
-  Structured_msg_builder_config app_shm_builder_config();
+  Structured_msg_builder_config
+    app_shm_builder_config(size_t segment1_sz
+                                    = sizeof(::capnp::word) * ::capnp::SUGGESTED_FIRST_SEGMENT_WORDS);
 
   /**
    * When transmitting items originating in #Arena app_shm() via transport::struc::shm::Builder::emit_serialization()
@@ -377,10 +407,10 @@ typename CLASS_CLSC_SESSION_MV::Arena::template Handle<T>
 
 TEMPLATE_CLSC_SESSION_MV
 typename CLASS_CLSC_SESSION_MV::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_MV::session_shm_builder_config()
+  CLASS_CLSC_SESSION_MV::session_shm_builder_config(size_t segment1_sz)
 {
   assert(Base::Base::impl() && "Do not call this on as-if-default-cted Session.");
-  return Base::Base::impl()->session_shm_builder_config();
+  return Base::Base::impl()->session_shm_builder_config(segment1_sz);
 }
 
 TEMPLATE_CLSC_SESSION_MV
@@ -401,10 +431,10 @@ typename CLASS_CLSC_SESSION_MV::Structured_msg_reader_config
 
 TEMPLATE_CLSC_SESSION_MV
 typename CLASS_CLSC_SESSION_MV::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_MV::app_shm_builder_config()
+  CLASS_CLSC_SESSION_MV::app_shm_builder_config(size_t segment1_sz)
 {
   assert(Base::Base::impl() && "Do not call this on as-if-default-cted Session.");
-  return Base::Base::impl()->app_shm_builder_config();
+  return Base::Base::impl()->app_shm_builder_config(segment1_sz);
 }
 
 TEMPLATE_CLSC_SESSION_MV

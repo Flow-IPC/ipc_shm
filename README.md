@@ -17,10 +17,11 @@ sub-projects together, including this one.
 Still interested?  Then read on.
 
 `ipc_shm` depends on `ipc_session` (and all its dependencies; i.e. `ipc_transport_structured`, `ipc_core`, `flow`).
-It provides `ipc::shm::stl`, `ipc::transport::struc::shm` (including `ipc::transport::struc::shm::classic` but
-excluding all other such sub-namespaces), `ipc::shm::classic`, and `ipc::session::shm::classic`.
+It provides `ipc::shm::stl`, `ipc::transport::struc::shm` (including `ipc::transport::struc::shm::classic` and
+`ipc::transport::struc::shm::rpc` but excluding all other such sub-namespaces), `ipc::shm::classic`, and
+`ipc::session::shm::classic`.
 
-Roughly speaking one can think of `ipc_shm` in 3 ways, from the developer's point of view.  These are ordered
+Roughly speaking one can think of `ipc_shm` in 4 ways, from the developer's point of view.  These are ordered
 in descending order of mass appeal, by our estimation.
 
   - It **empowers the established concepts of its dependencies** (`ipc::transport` and
@@ -30,6 +31,10 @@ in descending order of mass appeal, by our estimation.
     details: just know that (1) no copying is occurring; and (2) modifying a thing "here" has effect on that thing
     earlier having been received "there."
     - This is of interest for, we estimate, most developers interested in IPC.
+  - It provides **zero-copy-enabled capnp-RPC** (Cap'n Proto's Remote Procedure Call layer), for those who prefer
+    that programming model to `ipc::transport::struc::Channel` message passing.  (`ipc::transport::struc::shm::rpc`
+    supplies a drop-in replacement for capnp's `TwoPartyVatNetwork`, plus counterparts of capnp's connection-setup
+    helpers; the rest of your capnp-RPC code stays the same.)
   - It adds the ability to transmit (again, with zero-copy) **native C++ data structures**
     (of arbitrary complexity, including STL containers of STL containers of ... of `struct`s of STL containers of...
     etc.).  All the hairy goodies -- allocators, fancy-pointers, and so on -- are provided.  As a result you
@@ -40,7 +45,7 @@ in descending order of mass appeal, by our estimation.
       One tries to keep it to the capnp-backed schema-based messages of `ipc::transport::struc`; but
       sometimes that's not sufficient, and one will want to "go native with it."
   - At the lowest level, direct access to SHM in a classic way is provided as well.  (Internally this backs
-    the higher-level SHM-enabled features above.)  This is called the **SHM-classic SHM provider**.
+    the higher-level SHM-enabled features above.)  This is called the **SHM-classic SHM-provider**.
     Typically one need not worry about it, other than specifying that this is SHM-provider one would like
     to use for their entire session.  However, if desired, the SHM-classic pools can be set up and accessed
     directly.  In that sense it is akin to boost.interprocess's delightful SHM support.

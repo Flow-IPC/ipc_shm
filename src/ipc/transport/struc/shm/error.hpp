@@ -75,7 +75,7 @@ Error_code make_error_code(Code err_code);
  * @return See above.
  */
 std::istream& operator>>(std::istream& is, Code& val);
-// @todo - `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
+// @todo `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
 
 /**
  * Analogous to transport::error::operator<<().
@@ -87,7 +87,7 @@ std::istream& operator>>(std::istream& is, Code& val);
  * @return See above.
  */
 std::ostream& operator<<(std::ostream& os, Code val);
-// @todo - `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
+// @todo `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
 
 } // namespace ipc::transport::struc::shm::error
 
@@ -99,8 +99,8 @@ namespace boost::system
 /**
  * Ummm -- it specializes this `struct` to -- look -- the end result is boost.system uses this as
  * authorization to make `enum` `Code` convertible to `Error_code`.  The non-specialized
- * version of this sets `value` to `false`, so that random arbitary `enum`s can't just be used as
- * `Error_code`s.  Note that this is the offical way to accomplish that, as (confusingly but
+ * version of this sets `value` to `false`, so that random arbitrary `enum`s can't just be used as
+ * `Error_code`s.  Note that this is the official way to accomplish that, as (confusingly but
  * formally) documented in boost.system docs.
  */
 template<>

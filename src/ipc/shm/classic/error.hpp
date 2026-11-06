@@ -22,9 +22,9 @@
 
 /**
  * Namespace containing the ipc::shm::classic module's extension of boost.system error conventions, so that that API
- * can return codes/messages from within its own new set of error codes/messages.  Historically this was written
- * after ipc::transport::error, and essentially all the notes in that doc header and otherwise within that
- * namespace apply equally here.  Therefore please:
+ * can return codes/messages from within its own new set of error codes/messages.  It follows the pattern
+ * of ipc::transport::error; essentially all the notes in that doc header and otherwise within that namespace apply
+ * equally here.  Therefore please:
  *
  * @see ipc::transport::error documentation; notes therein (such as to-dos) likely apply here equally.
  */
@@ -37,7 +37,7 @@ namespace ipc::shm::classic::error
 constexpr int S_CODE_LOWEST_INT_VALUE = 1;
 
 /**
- * All possible errors returned (via `Error_code` arguments) by ipc::shm functions/methods *outside of*
+ * All possible errors returned (via `Error_code` arguments) by ipc::shm::classic functions/methods *outside of*
  * possibly system-triggered errors.
  *
  * All notes from transport::error::Code doc header apply here.
@@ -48,7 +48,15 @@ enum class Code
    * Low-level boost.ipc.shm: boost.interprocess emitted miscellaneous library exception sans a system code;
    * a WARNING message at throw-time should contain all possible details.
    */
-  S_SHM_BIPC_MISC_LIBRARY_ERROR,
+  S_SHM_BIPC_MISC_LIBRARY_ERROR = S_CODE_LOWEST_INT_VALUE,
+
+  /**
+   * SHM-classic pool/arena, requested to be opened in native read-only mode, was found by name, but its internal
+   * setup had not been completed (e.g., the creating op was still in progress); so the pool-open failed.  The contract
+   * requires completing the pool-create op before a read-only pool-open.  Violating it can instead cause undefined
+   * behavior: this error means only that a violation was detected this time.
+   */
+  S_SHM_POOL_OPEN_READ_ONLY_FOUND_BUT_UNINIT,
 
   /// SENTINEL: Not an error.  This Code must never be issued by an error/success-emitting API; I/O use only.
   S_END_SENTINEL
@@ -75,7 +83,7 @@ Error_code make_error_code(Code err_code);
  * @return See above.
  */
 std::istream& operator>>(std::istream& is, Code& val);
-// @todo - `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
+// @todo `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
 
 /**
  * Analogous to transport::error::operator<<().
@@ -87,7 +95,7 @@ std::istream& operator>>(std::istream& is, Code& val);
  * @return See above.
  */
 std::ostream& operator<<(std::ostream& os, Code val);
-// @todo - `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
+// @todo `@relatesalso Code` makes Doxygen complain; maybe it doesn't work with `enum class`es like Code.
 
 } // namespace ipc::shm::classic::error
 
@@ -99,8 +107,8 @@ namespace boost::system
 /**
  * Ummm -- it specializes this `struct` to -- look -- the end result is boost.system uses this as
  * authorization to make `enum` `Code` convertible to `Error_code`.  The non-specialized
- * version of this sets `value` to `false`, so that random arbitary `enum`s can't just be used as
- * `Error_code`s.  Note that this is the offical way to accomplish that, as (confusingly but
+ * version of this sets `value` to `false`, so that random arbitrary `enum`s can't just be used as
+ * `Error_code`s.  Note that this is the official way to accomplish that, as (confusingly but
  * formally) documented in boost.system docs.
  */
 template<>
