@@ -2,7 +2,7 @@
 
 ## Installation
 
-An exported `ipc_shm` consists of C++ header files installed under "ipc/..." in the
+An exported `ipc_shm` consists of C++ header files installed under `ipc/...` in the
 include-root; and a library such as `libipc_shm.a`.
 Certain items are also exported for people who use CMake to build their own
 projects; we make it particularly easy to use `ipc_shm` proper in that case
@@ -44,9 +44,9 @@ To build `ipc_shm`:
      but the basics are as follows.  CMake is very flexible and powerful; we've tried not to mess with that principle
      in our build script(s).
      1. Choose a tool.  `ccmake` will allow you to interactively configure aspects of the build system, including
-        showing docs for various knobs our CMakeLists.txt (and friends) have made availale.  `cmake` will do so without
-        asking questions; you'll need to provide all required inputs on the command line.  Let's assume `cmake` below,
-        but you can use whichever makes sense for you.
+        showing docs for various knobs our `CMakeLists.txt` (and friends) have made available.  `cmake` will do so
+        without asking questions; you'll need to provide all required inputs on the command line.  Let's assume `cmake`
+        below, but you can use whichever makes sense for you.
      2. Choose a working *build directory*, somewhere outside the present `ipc` distribution.  Let's call this
         `$BUILD`: please `mkdir -p $BUILD`.  Below we'll refer to the directory containing the present `README.md` file
         as `$SRC`.

@@ -268,8 +268,8 @@ struct Lender_obj_stats
    *   - Arena-lending: A dedicated SHM-session object handles lending things: `shm_session.lend_object(obj)`.
    *     Nevertheless the `shm_session` knows from which arena the handle `obj` comes:
    *     `arena` itself had to first be *lent* to the process on the opposing side of `shm_session`.
-   *     E.g.: see arena_lend::jemalloc::Shm_session::lend_object(),
-   *     arena_lend::jemalloc::Shm_session::lend_arena().
+   *     E.g.: see session::shm::arena_lend::jemalloc::Shm_session::lend_object(),
+   *     session::shm::arena_lend::jemalloc::Shm_session::lend_arena().
    *
    * Incidentally: to allow for SHM-provider-type-agnostic user code, where possible, SHM-enabled
    * ipc::session::Session impls provide forwarding/wrapping `lend_object()` APIs:
@@ -307,7 +307,7 @@ struct Lender_obj_stats
  *     in an opposing process: `arena.borrow_object()`.
  *     E.g.: see classic::Pool_arena::borrow_object().
  *   - Arena-lending: A dedicated SHM-session object handles borrowing things: `shm_session.borrow_object(blob)`.
- *     E.g.: see arena_lend::jemalloc::Shm_session::borrow_object().
+ *     E.g.: see session::shm::arena_lend::jemalloc::Shm_session::borrow_object().
  *
  * To reiterate: A Borrower_obj_stats tracks *one* arena-or-session's (depending on SHM-provider context)
  * accumulated stats.  This is a consequence of the difference in fundamental design of the two SHM-provider

@@ -170,7 +170,7 @@ namespace ipc::session::shm::classic
  *   - Server: Open handle for session_shm() (create-only mode) and for app_shm() (same), just
  *     before send of log-in response, for each log-in.  app_shm() is stored centrally in originating
  *     shm::classic::Session_server.  Insertion point: *during* vanilla opening procedure.
- *     - Use Server_session_impl::async_accept_log_in()`'s `pre_rsp_setup_func()` arg for this purpose; in turn
+ *     - Use Server_session_impl::async_accept_log_in()'s `pre_rsp_setup_func()` arg for this purpose; in turn
  *       inside the body supplied for that guy shm::classic::Session_server  uses the Session_server_impl ctor's
  *       `per_app_setup_func()` arg (customization point) for the centrally-performed app_shm() arena generation
  *       on-demand.

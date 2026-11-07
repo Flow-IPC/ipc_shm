@@ -78,7 +78,7 @@ class Capnp_message_reader;
  *
  * `Shm_session1` and `Shm_session2` supported, respectively, include:
  *   - shm::classic::Pool_arena, shm::classic::Pool_arena (sic);
- *   - shm::arena_lend::jemalloc::Shm_session, shm::arena_lend::jemalloc::Shm_session (sic);
+ *   - session::shm::arena_lend::jemalloc::Shm_session, session::shm::arena_lend::jemalloc::Shm_session (sic);
  *   - session::shm::classic::Client_session, session::shm::classic::Server_session;
  *     - vice versa;
  *   - session::shm::arena_lend::jemalloc::Client_session, session::shm::arena_lend::jemalloc::Server_session;

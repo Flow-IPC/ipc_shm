@@ -66,7 +66,7 @@
  * ### Learning capnp-RPC; examples ###
  * How to use capnp-RPC itself is outside our scope here.  See https://capnproto.org/rpc.html and
  * https://capnproto.org/cxxrpc.html; and capnp's Calculator sample (`c++/samples/calculator-*`).  Flow-IPC's
- * test/suite/rpc_demo program replicates that sample using the classes above.
+ * `test/suite/rpc_demo` program replicates that sample using the classes above.
  *
  * @see The guided Manual chapter @ref chan_rpc covers these topics.
  */
