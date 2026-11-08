@@ -32,34 +32,74 @@ using Cxx = import "/capnp/c++.capnp";
 #     - detail: Not to be used by external user of this library+API but merely internally.
 $Cxx.namespace("ipc::transport::struc::shm::schema::detail");
 
-# --- shm_serialization.capnp ---
+# --- serialization.capnp ---
 # This schema centers around struct ShmTopSerialization which encodes a SHM-stored list of capnp-generated
 # SHM-stored segments (word arrays), allocated as needed when preceding segment runs out of space inside
 # a mutating capnp-generated mutator call by the user, namely when they're mutating the contents of the out-message
 # they want to send soon-enough.
+#
+# For the optional capnp-RPC layer (ipc::transport::struc::shm::rpc) the schema centers on
+# struct CapnpRpcMsgTopSerialization.
 
 # --- END Header.
 
-# Types used by schema below.
-
-using Common = import "/ipc/transport/struc/shm/schema/common.capnp";
-using ShmHandle = Common.ShmHandle;
-
 # Main schema.
+
+# Note: Both structs below store the SHM-handle blob as a bare Data field, rather than via the public-facing
+# Common.ShmHandle wrapper struct.  These are hot-path per-message headers; a capnp struct nesting costs
+# a word (8 bytes) per level, and the wrapper would add nothing here.  (Common.ShmHandle remains as a convenience
+# for user schemas.)  The field is named identically to Common.ShmHandle.shmHandleSerialization on purpose:
+# struc::shm::capnp_set_lent_shm_handle() and capnp_get_shm_handle_to_borrow() work on any struct with a Data
+# field of that name; and Capnp_message_builder::lend() and Capnp_message_reader::borrow() rely on those.
 
 struct ShmTopSerialization
 {
-  segmentListInShm @0 :ShmHandle;
-  # Interpret as: Arena::Handle<list<Blob>> from the concept as required by shm::Builder and
+  shmHandleSerialization @0 :Data;
+  # The SHM-handle blob, as returned by the SHM-session's lend_object() (to be passed to the opposing
+  # borrow_object()).  Interpret as: Arena::Handle<list<Blob>> from the concept as required by shm::Builder and
   # shm::Reader class templates (see their doc headers).
-  # In the pointed-to structure, each list<> element is capnp-serialized segment.
+  # In the pointed-to structure, each list<> element is a capnp-serialized segment.
   # - Each element Blob::size() is the size used by the serialization, in that segment;
   # - Each Blob::capacity() is the (equal or greater) buffer size allocated for that segment by the
   #   MessageBuilder.
-  # Hence a SegmentArrayReader is to be fed each Blob's [begin, end()) range, and the resulting
+  # Hence a SegmentArrayMessageReader is to be fed each Blob's [begin(), end()) range, and the resulting
   # MessageReader is the zero-copy deserialization of the originally mutated schema.
   #
-  # For info on serializing the list<Blob> into ShmHandle and deserializing from Shm_handle to list<Blob>,
-  # see Common.ShmHandle.  The bottom line is, this ShmHandle will be a mere small blob regardless of how
+  # The bottom line is, this blob is small (and of a fixed size for a given SHM-provider) regardless of how
   # huge/complex the list<Blob>-serialized data structure is.
+}
+
+struct CapnpRpcMsgTopSerialization
+{
+  # See Session_vat_network.
+
+  shmHandleSerialization @0 :Data;
+  # The star of the show as usual.  Identical in meaning to ShmTopSerialization.shmHandleSerialization: the handle
+  # is to the in-SHM serialization of messages created and used by capnp::RpcSystem et al.  We usually don't rely on
+  # the following fact, except (and this is rare) for cross-layer optimization purposes and for exposition.
+  # The fact: the schema encoded in that in-SHM message is capnp's internal rpc::Message.
+
+  isShortLivedMsg @1 :Bool = true;
+  # Helps implement the TwoPartyVatNetwork-inspired/compatible short-lived-message optimization;
+  # Session_vat_network internally uses (see comments in e.g. ctor) this.  `true` means the rpc::Message
+  # in shmHandleSerialization is of a type such that it can be discarded completely before handling the next
+  # in-message; `false` means it cannot and may need to be stored.  (This has probably less impact in
+  # Session_vat_network than vanilla TwoPartyVatNetwork, as in our case the copying involved in "to be stored"
+  # is minimal -- just the SHM handle -- while the rpc::Message continues to sit quietly in SHM, never copied.
+  # Nevertheless we figured might as well keep the optimization.  Details in Session_vat_network ctor.)
+  #
+  # Not a huge deal but default to `true` simply because most messages *are* short-lived; so this needs to be touched
+  # relatively rarely to set it to non-default `false`.  (We do not worry about "what happens if this is set
+  # incorrectly," as we control both sides, and both sides are straightforward (bugginess unlikely), and trust in
+  # both directions is a prerequisite.)
+  #
+  # For convenience some info: The way Session_vat_network sets this is:
+  #   - Message with user payload (meaning they called capnp-generated mutators to load the data themselves)
+  #     <=> (in SHM) rpc::Message *can* be large (user's decision)
+  #     <=> rpc::Message union-which = CALL or RETURN <-- We check this...
+  #     <=> isShortLivedMsg = false <-- ...and set this.
+  #   - Control message (meaning generated by capnp-RPC internals to make the RPC protocol work)
+  #     <=> (in SHM) rpc::Message *cannot* be large (ctl messages are small)
+  #     <=> rpc::Message union-which = *not* CALL nor RETURN <-- We check this...
+  #     <=> isShortLivedMsg = true <-- ...and set this.
 }

@@ -23,6 +23,7 @@
 #include "ipc/session/shm/classic/classic.hpp"
 #include "ipc/transport/struc/shm/classic/classic_fwd.hpp"
 #include "ipc/transport/struc/shm/classic/classic.hpp"
+#include "ipc/transport/struc/struc_fwd.hpp"
 #include <cstring>
 
 namespace ipc::session::shm::classic
@@ -61,7 +62,7 @@ public:
    * Its main relevant things are: `construct<T>` (returns `shared_ptr<T>`, garbage-collected including cross-process);
    * and integration with STL-compliant ipc::shm::stl allocator(s).
    *
-   * In this SHM provider, this #Arena object is also the "session" object; meaning it is the per-session
+   * In this SHM-provider, this #Arena object is also the "session" object; meaning it is the per-session
    * thingie capable of `lend_object()` (prepare to transmit to opposing conversant) and `borrow_object()` (accept
    * the same).
    */
@@ -120,9 +121,11 @@ public:
 
   /**
    * See shm::classic::Session_mv counterpart.
+   * @param segment1_sz
+   *        See shm::classic::Session_mv counterpart.
    * @return See shm::classic::Session_mv counterpart.
    */
-  Structured_msg_builder_config session_shm_builder_config();
+  Structured_msg_builder_config session_shm_builder_config(size_t segment1_sz);
 
   /**
    * See shm::classic::Session_mv counterpart.
@@ -138,9 +141,11 @@ public:
 
   /**
    * See shm::classic::Session_mv counterpart.
+   * @param segment1_sz
+   *        See shm::classic::Session_mv counterpart.
    * @return See shm::classic::Session_mv counterpart.
    */
-  Structured_msg_builder_config app_shm_builder_config();
+  Structured_msg_builder_config app_shm_builder_config(size_t segment1_sz);
 
   /**
    * See shm::classic::Session_mv counterpart.
@@ -159,11 +164,6 @@ public:
   using flow::log::Log_context::get_log_component;
 
 protected:
-  // Types.
-
-  /// Short-hand for, basically, #Arena that may not have been opened yet (and is therefore null).
-  using Arena_ptr = boost::movelib::unique_ptr<Arena>;
-
   // Methods.
 
   /**
@@ -171,16 +171,16 @@ protected:
    * values replacing null values.
    *
    * @param session_shm_not_null
-   *        Value for session_shm().  The arg is nullfied by the method (via move()).
+   *        Handle for session_shm().  The arg is nullified by the method (via `move()`).
    * @param app_shm_not_null
-   *        Value for app_shm().  The pointee must stay alive until `*this` is destroyed.
+   *        Handle for app_shm() (probably a copy if `*this` is really a Server_session_impl: the per-app arena is
+   *        shared among `Server_session_impl`s).  The arg is nullified by the method (via `move()`).
    */
-  void init_shm_arenas(Arena_ptr&& session_shm_not_null, Arena* app_shm_not_null);
+  void init_shm_arenas(Arena_ptr&& session_shm_not_null, Arena_ptr&& app_shm_not_null);
 
   /**
    * Undoes init_shm_arenas().  Intended as of this writing as a one-time resource clean in case of subsequent failure.
-   * @warning Since `*this` class (not speaking of sub-class) does not own app_shm()'s pointee, that pointee
-   *          is *not* destroyed.  That is the caller's responsibility.
+   * (Only our handle to the app_shm() arena is dropped; the arena lives on, if and while others hold it.)
    */
   void reset_shm_arenas();
 
@@ -204,9 +204,11 @@ private:
    *
    * @param session_else_app_scope
    *        Whether you want session_shm() or app_shm() to back the serialization.
+   * @param segment1_sz
+   *        See above.
    * @return See above.
    */
-  Structured_msg_builder_config shm_builder_config(bool session_else_app_scope);
+  Structured_msg_builder_config shm_builder_config(bool session_else_app_scope, size_t segment1_sz);
 
   /**
    * Implementation of session_shm_reader_config(), app_shm_reader_config().
@@ -227,11 +229,11 @@ private:
 
   /**
    * See app_shm().  This becomes non-null, together with #m_session_shm, via assignment at most once via
-   * init_shm_arenas().  However, unlike #m_session_shm, this is a raw pointer: this allows for
-   * one #Arena to be shared among multiple `*this`s (which is essential on the server side; i.e.,
-   * for shm::classic::Server_session_impl).
+   * init_shm_arenas().  Unlike #m_session_shm, the pointee is possible shared with other holders (on the server
+   * side: the `Session_server` and its other `Server_session`s of the same Client_app).  If `*this` is really
+   * a Client_session_impl, then it is not shared.
    */
-  Arena* m_app_shm = {};
+  Arena_ptr m_app_shm;
 }; // class Session_impl
 
 // Free functions: in *_fwd.hpp.
@@ -246,20 +248,20 @@ private:
   Session_impl<Session_impl_t>
 
 TEMPLATE_CLSC_SESSION_IMPL
-void CLASS_CLSC_SESSION_IMPL::init_shm_arenas(Arena_ptr&& session_shm_not_null, Arena* app_shm_not_null)
+void CLASS_CLSC_SESSION_IMPL::init_shm_arenas(Arena_ptr&& session_shm_not_null, Arena_ptr&& app_shm_not_null)
 {
   assert(!m_session_shm);
   assert(!m_app_shm);
 
   m_session_shm = std::move(session_shm_not_null);
-  m_app_shm = app_shm_not_null;
+  m_app_shm = std::move(app_shm_not_null);
 }
 
 TEMPLATE_CLSC_SESSION_IMPL
 void CLASS_CLSC_SESSION_IMPL::reset_shm_arenas()
 {
   m_session_shm.reset();
-  m_app_shm = nullptr; // As advertised we do not clean this (it may be shared).
+  m_app_shm.reset(); // Just our handle; the arena itself lives on while others hold it.
 }
 
 TEMPLATE_CLSC_SESSION_IMPL
@@ -271,7 +273,7 @@ typename CLASS_CLSC_SESSION_IMPL::Arena* CLASS_CLSC_SESSION_IMPL::session_shm()
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Arena* CLASS_CLSC_SESSION_IMPL::app_shm()
 {
-  return m_app_shm;
+  return m_app_shm.get();
 }
 
 TEMPLATE_CLSC_SESSION_IMPL
@@ -303,13 +305,13 @@ typename CLASS_CLSC_SESSION_IMPL::Blob
    * quite impossible for it to know.  Even if one understands what's inside `serialization` (spoiler alert -- currently
    * Pool_arena places there offset from pool base addr), its meaning is only meaningful when knowing
    * the Arena. */
-  Blob real_serialization(serialization.size() + sizeof(scope_id));
+  Blob real_serialization{serialization.size() + sizeof(scope_id)};
   real_serialization.emplace_copy(real_serialization.begin(), serialization.const_buffer());
   real_serialization.emplace_copy(real_serialization.begin() + serialization.size(),
-                                  Blob_const(&scope_id, sizeof(scope_id)));
+                                  Blob_const{&scope_id, sizeof(scope_id)});
 
   FLOW_LOG_TRACE("Session [" << *this << "]: SHM-classic-lend serialization: "
-                 "[" << buffers_dump_string(real_serialization.const_buffer(), "  ") << "].");
+                 "[\n" << buffers_dump_string(real_serialization.const_buffer(), "  ") << "].");
 
   return real_serialization;
 } // Session_impl::lend_object()
@@ -328,7 +330,7 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
   // This should be possible to understand if one has grokked lend_object().
 
   FLOW_LOG_TRACE("Session [" << *this << "]: SHM-classic-borrow serialization: "
-                 "[" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
+                 "[\n" << buffers_dump_string(serialization.const_buffer(), "  ") << "].");
 
   if (serialization.size() < SCOPE_ID_SZ)
   {
@@ -343,13 +345,13 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
   }
   // else
 
-  Blob real_serialization(serialization); // Copy (it's small).
+  Blob real_serialization{serialization}; // Copy (it's small).
 
   const auto real_serialization_sz = real_serialization.size() - SCOPE_ID_SZ;
   real_serialization.start_past_prefix_inc(real_serialization_sz);
 
-  /* real_serialization.data() is aligned fine if only due to being a (deep) copy.  However we don't know
-   * know for sure that real_serialization_sz implies alignment of scope_id immediately following.  Hence
+  /* real_serialization.data() is aligned fine if only due to being a (deep) copy.  However we do not know
+   * for sure that real_serialization_sz implies alignment of scope_id immediately following.  Hence
    * memcpy() -- do not assign, if only for that reason. */
   scope_id_t scope_id;
   memcpy(&scope_id, real_serialization.const_data(), SCOPE_ID_SZ);
@@ -377,24 +379,39 @@ typename CLASS_CLSC_SESSION_IMPL::Arena::template Handle<T>
 
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_IMPL::shm_builder_config(bool session_else_app_scope)
+  CLASS_CLSC_SESSION_IMPL::shm_builder_config(bool session_else_app_scope, size_t segment1_sz)
 {
+  using transport::struc::shm::stat::Outer_serializer_global_stats;
+  using transport::struc::shm::stat::Core_serializer_global_stats;
+
   const auto arena = session_else_app_scope ? session_shm() : app_shm();
-  return Structured_msg_builder_config{ get_logger(), 0, 0, arena };
-} // Session_impl_util::shm_builder_config()
+  return Structured_msg_builder_config{ get_logger(), segment1_sz,
+                                        transport::struc::BUILDER_CONFIG_FRAME_PREFIX_SZ_VIA_STRUC_CHANNEL,
+                                        arena,
+                                        // Default snd-stats targets: per-Arena SHM-msg-{inner,outer} globals.
+                                        &Core_serializer_global_stats<Arena>::get()
+                                          .stats_mutable_default().m_snd,
+                                        &Outer_serializer_global_stats<Arena>::get()
+                                          .stats_mutable_default().m_snd };
+} // Session_impl::shm_builder_config()
 
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Structured_msg_reader_config
   CLASS_CLSC_SESSION_IMPL::shm_reader_config(bool session_else_app_scope)
 {
-  return Structured_msg_reader_config{ get_logger(), session_else_app_scope ? session_shm() : app_shm() };
-} // Session_impl_util::shm_reader_config()
+  using transport::struc::shm::stat::Outer_serializer_global_stats;
+
+  return Structured_msg_reader_config{ get_logger(), session_else_app_scope ? session_shm() : app_shm(),
+                                       // Default rcv-stats target: per-Arena SHM-msg-outer global.
+                                       &Outer_serializer_global_stats<Arena>::get()
+                                         .stats_mutable_default().m_rcv };
+} // Session_impl::shm_reader_config()
 
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_IMPL::session_shm_builder_config()
+  CLASS_CLSC_SESSION_IMPL::session_shm_builder_config(size_t segment1_sz)
 {
-  return shm_builder_config(true);
+  return shm_builder_config(true, segment1_sz);
 }
 
 TEMPLATE_CLSC_SESSION_IMPL
@@ -413,9 +430,9 @@ typename CLASS_CLSC_SESSION_IMPL::Structured_msg_reader_config
 
 TEMPLATE_CLSC_SESSION_IMPL
 typename CLASS_CLSC_SESSION_IMPL::Structured_msg_builder_config
-  CLASS_CLSC_SESSION_IMPL::app_shm_builder_config()
+  CLASS_CLSC_SESSION_IMPL::app_shm_builder_config(size_t segment1_sz)
 {
-  return shm_builder_config(false);
+  return shm_builder_config(false, segment1_sz);
 }
 
 TEMPLATE_CLSC_SESSION_IMPL

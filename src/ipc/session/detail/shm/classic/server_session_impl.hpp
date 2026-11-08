@@ -20,8 +20,10 @@
 
 #include "ipc/session/detail/shm/classic/session_impl.hpp"
 #include "ipc/session/detail/shm/classic/classic_fwd.hpp"
+#include "ipc/session/detail/shm/classic/session_server_dtl.hpp"
 #include "ipc/session/detail/server_session_impl.hpp"
-#include <boost/move/make_unique.hpp>
+#include <boost/make_shared.hpp>
+#include <type_traits>
 #include <utility>
 
 namespace ipc::session::shm::classic
@@ -42,32 +44,34 @@ namespace ipc::session::shm::classic
  * assigning session_shm() and app_shm() values; and provide the server-specific APIs (notably
  * async_accept_log_in()).
  *
- * To implement app_shm() assignment we share a member map (from Client_app to `Arena`)
+ * To implement app_shm() assignment we share a member map (from Client_app to `Arena` handle)
  * in the "parent" (emitting) shm::classic::Session_server -- after all it did have to create such a handle,
  * in create-only mode, possibly even during `pre_rsp_setup_func()` (if the opposing Client_app is
- * encountered the first time by that server).  So we just access it through shm::classic::Session_server::app_shm(),
- * passing-in the relevant Client_app; and save that pointer to be returned by app_shm().
+ * encountered the first time by that server).  So we just obtain it from there (via the Session_server_dtl
+ * facade, passing-in the relevant Client_app) as a shared handle (#Arena_ptr) -- co-owned by the server and each
+ * of its sessions for that Client_app -- to be returned by app_shm().
  *
  * (Why jump through such hoops?  Couldn't we simply `OPEN_OR_CREATE` it ourselves; after all the OS would
  * then essentially implement the map for us in the kernel, and we needn't all the boiler-plate?  Answer:
- * That's fantastic and superior; except the shm::classic::Pool_arena thus created could not live past `*this`;
- * which would break the contract of shm::classic::Session::app_shm() as listed in its doc header.)
+ * That's fantastic and superior; except each such shm::classic::Pool_arena would be a separate object, whereas
+ * the contract of shm::classic::Session::app_shm() (see its doc header) is that all sessions of a Client_app, and the
+ * server, return the *same* `Arena*`.)
  *
  * session_shm(), however, is simple.  We just `CREATE_ONLY` it, as its lifetime by definition equals the
  * session's (`*this`).
  *
- * @tparam S_MQ_TYPE_OR_NONE
+ * @tparam MQ_TYPE_OR_NONE
  *         See shm::classic::Server_session counterpart.
- * @tparam S_TRANSMIT_NATIVE_HANDLES
+ * @tparam TRANSMIT_NATIVE_HANDLES
  *         See shm::classic::Server_session counterpart.
  * @tparam Mdt_payload
  *         See shm::classic::Server_session counterpart.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 class Server_session_impl :
   public Session_impl
-           <session::Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload,
-                                         schema::ShmType::CLASSIC,
+           <session::Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload,
+                                         session::schema::ShmType::CLASSIC,
                                          transport::struc::shm::Builder_base::S_MAX_SERIALIZATION_SEGMENT_SZ>>
 {
 public:
@@ -75,8 +79,8 @@ public:
 
   /// Short-hand for our non-`virtual` base.
   using Base = Session_impl
-                 <session::Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload,
-                                               schema::ShmType::CLASSIC,
+                 <session::Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload,
+                                               session::schema::ShmType::CLASSIC,
                                                transport::struc::shm::Builder_base::S_MAX_SERIALIZATION_SEGMENT_SZ>>;
 
   // Constructors/destructor.
@@ -147,6 +151,8 @@ public:
    *
    * @param srv
    *        See Server_session_mv counterpart.
+   * @param mq_msg_size_limit
+   *        See Server_session_mv counterpart.
    * @param init_channels_by_srv_req
    *        See Server_session_mv counterpart.
    * @param mdt_from_cli_or_null
@@ -169,7 +175,7 @@ public:
   template<typename Session_server_impl_t,
            typename Task_err, typename Cli_app_lookup_func, typename Cli_namespace_func, typename Pre_rsp_setup_func,
            typename N_init_channels_by_srv_req_func, typename Mdt_load_func>
-  void async_accept_log_in(Session_server_impl_t* srv,
+  void async_accept_log_in(Session_server_impl_t* srv, size_t mq_msg_size_limit,
                            typename Base::Base::Channels* init_channels_by_srv_req,
                            typename Base::Base::Mdt_reader_ptr* mdt_from_cli_or_null,
                            typename Base::Base::Channels* init_channels_by_cli_req,
@@ -190,21 +196,31 @@ public:
 
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define TEMPLATE_CLSC_SRV_SESSION_IMPL \
-  template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+  template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define CLASS_CLSC_SRV_SESSION_IMPL \
-  Server_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>
+  Server_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>
 
-// Only declared so it could be documented.  Please see async_accept_log_in(); it ensures the documented behavior.
+// Please see async_accept_log_in() as to how the documented behavior (pool cleanup) is ensured.
 TEMPLATE_CLSC_SRV_SESSION_IMPL
-CLASS_CLSC_SRV_SESSION_IMPL::~Server_session_impl() = default;
+CLASS_CLSC_SRV_SESSION_IMPL::~Server_session_impl()
+{
+  /* Base::Base (session::Server_session_impl) maintains thread W (async_worker()); and we do post onto it:
+   * async_accept_log_in() sets up the SHM arenas in thread W, assigning Base's (Session_impl's) arena handles there.
+   * Base::Base's dtor does stop thread W first-thing -- but by the time it runs, Base's members have already been
+   * destroyed (derived-class members go first).  Hence the documented contract of this protected guy: the terminal
+   * subclass's dtor must stop thread W itself, ~first-thing, so that Base's members can be destroyed in peace.
+   * (Cf. the SHM-jemalloc counterpart which does the same.) */
+  Base::Base::dtor_async_worker_stop();
+  // Thread W has been joined.
+}
 
 TEMPLATE_CLSC_SRV_SESSION_IMPL
 template<typename Session_server_impl_t,
          typename Task_err, typename Cli_app_lookup_func, typename Cli_namespace_func, typename Pre_rsp_setup_func,
          typename N_init_channels_by_srv_req_func, typename Mdt_load_func>
 void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
-       (Session_server_impl_t* srv,
+       (Session_server_impl_t* srv, size_t mq_msg_size_limit,
         typename Base::Base::Channels* init_channels_by_srv_req,
         typename Base::Base::Mdt_reader_ptr* mdt_from_cli_or_null,
         typename Base::Base::Channels* init_channels_by_cli_req,
@@ -213,7 +229,7 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
         N_init_channels_by_srv_req_func&& n_init_channels_by_srv_req_func, Mdt_load_func&& mdt_load_func,
         Task_err&& on_done_func)
 {
-  using boost::movelib::make_unique;
+  using boost::make_shared;
 
   // The extra stuff to do on top of the base vanilla Server_session_impl.
   auto real_pre_rsp_setup_func
@@ -221,11 +237,11 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
        // Get the Session_server<> such that its core comprises the arg `srv`.
        srv = srv->this_session_srv(),
        pre_rsp_setup_func = std::move(pre_rsp_setup_func)]
-        () -> Error_code
+        (const Client_app& cli_app) -> Error_code
   {
     // We are in thread W.
 
-    auto err_code = pre_rsp_setup_func();
+    auto err_code = pre_rsp_setup_func(cli_app);
     if (err_code)
     {
       // Any Session_server-given setup failed => no point in doing our SHM-classic per-session setup.
@@ -239,8 +255,9 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
      *   - pre_rsp_setup_func() had to have created what we want app_shm() to return.
      *     - If it already existed by then (Client_app seen already), even better.
      *     - If that creation failed, then pre_rsp_setup_func() just failed, so we are not here.
-     *   - Parent session server's app_shm(<the Client_app>) = what we want. */
-    auto app_shm = srv->app_shm(*(Base::Base::Base::cli_app_ptr()));
+     *   - Parent session server's app_shm(<the Client_app>) = what we want.  We take a shared handle to it (so
+     *     it lives as long as *this, even if the Session_server does not). */
+    auto app_shm = Session_server_dtl<std::remove_pointer_t<decltype(srv)>>{ *srv }.app_shm_ptr(cli_app);
     assert(app_shm && "How can it be null, if pre_rsp_setup_func() returned success?  Contract broken internally?");
 
     /* Now session_shm().  This is different (see our doc header again): we actually must create it ourselves, as it's
@@ -258,7 +275,7 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
                          / SHM_SUBTYPE_PREFIX
                          / Shared_name::S_1ST_OR_ONLY;
 
-    auto session_shm = make_unique<typename Base::Arena>(get_logger(), shm_pool_name, util::CREATE_ONLY,
+    auto session_shm = make_shared<typename Base::Arena>(get_logger(), shm_pool_name, util::CREATE_ONLY,
                                                          size_t(1024 * 1024) * srv->pool_size_limit_mi(),
                                                          util::shared_resource_permissions
                                                            (srv_app.m_permissions_level_for_client_apps),
@@ -280,7 +297,7 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
     }
     // else
 
-    Base::init_shm_arenas(std::move(session_shm), app_shm);
+    Base::init_shm_arenas(std::move(session_shm), std::move(app_shm));
 
     /* Cool!  Let's return (and continue the log-in async op!).  ...Not so fast.  Almost.
      * Please now see the doc header for our dtor, where we promise -- on dtor invocation -- to remove the
@@ -330,7 +347,7 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
       Base::Arena::remove_persistent(this->get_logger(), shm_pool_name, &sink);
     });
 
-    return err_code; // == Error_code().
+    return err_code; // == Error_code{}.
   }; // auto real_pre_rsp_setup_func =
 
   /* That's all we needed to do: ensure m_session_shm's underlying pool exists; m_session_shm points to it,
@@ -342,7 +359,7 @@ void CLASS_CLSC_SRV_SESSION_IMPL::async_accept_log_in
    * m_session_shm doc header we should aggressively clean up our SHM-pool handles.  So we just add a bit of
    * post-processing in that case. */
 
-  Base::Base::async_accept_log_in(srv,
+  Base::Base::async_accept_log_in(srv, mq_msg_size_limit,
                                   init_channels_by_srv_req, mdt_from_cli_or_null, init_channels_by_cli_req,
                                   std::move(cli_app_lookup_func),
                                   std::move(cli_namespace_func),

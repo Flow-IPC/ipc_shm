@@ -26,7 +26,7 @@ message(STATUS "Dependents shall need to import/link lib: ipc_session.")
 
 set(DEP_IPC_SESSION_VERSION 1.0)
 if(TARGET ipc_session)
-  set(DEP_LIBS ipc_session) # In meta-project mode it's loaded by this short name.
+  set(dep ipc_session) # In meta-project mode it's loaded by this short name.
 
   # In meta-project mode we lack the benefit of find_package(Ipc*) (see the other if() path); which means
   # the transitive dependency -- capnp -- has not been communicated to us.  So we must do it ourselves to
@@ -34,21 +34,26 @@ if(TARGET ipc_session)
   find_package(CapnProto ${CAPNP_VER} CONFIG REQUIRED)
 else()
   find_package(IpcSession ${DEP_IPC_SESSION_VERSION} CONFIG REQUIRED)
-  # In separate-project mode it's been install(EXPORT)ed with the namespace prefix.
-  set(DEP_LIBS IpcSession::ipc_session)
+  set(dep IpcSession::ipc_session) # In separate-project mode it's been install(EXPORT)ed with the namespace prefix.
 endif()
+# Plus we need libcapnp-rpc (also from capnp install) for our capnp-RPC-centered features.
+set(DEP_LIBS ${dep} CapnProto::capnp-rpc)
+unset(dep) # (CMake style: Tried using block() around the above instead... not worth it b/c of find_package() exports.)
 
 # Mirror above find_package() calls.  As directed omit "REQUIRED."
 set(DEP_LIBS_PKG_ARG_LISTS "IpcSession ${DEP_IPC_SESSION_VERSION} CONFIG")
 
-# (See above if wondering why we're not auto-searching for these.  There's a good reason.)
+# (See comment in FlowLikeLib.cmake if wondering why we're not auto-searching for these.  There's a good reason.)
 # Ideally keep this in `find -s` order.
 set(SRCS
     ipc/session/detail/shm/classic/session_shared_name.cpp
+    ipc/shm/bipc_ext/detail/sparse_shm_object.cpp
     ipc/shm/classic/error.cpp
     ipc/shm/classic/pool_arena.cpp
+    ipc/shm/classic/pool_arena_stats.cpp
     ipc/transport/struc/shm/error.cpp
-    ipc/transport/struc/shm/util.cpp)
+    ipc/transport/struc/shm/rpc/detail/ez_rpc_kj_io.cpp
+    ipc/transport/struc/shm/serializer_stats.cpp)
 set(CAPNP_SCHEMAS
     ipc/transport/struc/shm/schema/common.capnp
     ipc/transport/struc/shm/schema/detail/serialization.capnp)
@@ -57,6 +62,7 @@ set(HDRS
     ipc/session/detail/shm/classic/client_session_impl.hpp
     ipc/session/detail/shm/classic/server_session_impl.hpp
     ipc/session/detail/shm/classic/session_impl.hpp
+    ipc/session/detail/shm/classic/session_server_dtl.hpp
     ipc/session/shm/classic/classic.hpp
     ipc/session/shm/classic/classic_fwd.hpp
     ipc/session/shm/classic/client_session.hpp
@@ -65,12 +71,17 @@ set(HDRS
     ipc/session/shm/classic/session_server.hpp
     ipc/session/shm/shm.hpp
     ipc/session/shm/shm_fwd.hpp
+    ipc/shm/bipc_ext/detail/bipc_ext_fwd.hpp
+    ipc/shm/bipc_ext/detail/sparse_managed_shm.hpp
+    ipc/shm/bipc_ext/detail/sparse_shm_object.hpp
     ipc/shm/classic/classic.hpp
     ipc/shm/classic/classic_fwd.hpp
     ipc/shm/classic/error.hpp
     ipc/shm/classic/pool_arena.hpp
+    ipc/shm/classic/pool_arena_stats.hpp
     ipc/shm/shm.hpp
     ipc/shm/shm_fwd.hpp
+    ipc/shm/shm_stats.hpp
     ipc/shm/stl/arena_activator.hpp
     ipc/shm/stl/stateless_allocator.hpp
     ipc/shm/stl/stl_fwd.hpp
@@ -78,8 +89,19 @@ set(HDRS
     ipc/transport/struc/shm/classic/classic.hpp
     ipc/transport/struc/shm/classic/classic_fwd.hpp
     ipc/transport/struc/shm/error.hpp
+    ipc/transport/struc/shm/rpc/client_context.hpp
+    ipc/transport/struc/shm/rpc/context_server.hpp
+    ipc/transport/struc/shm/rpc/detail/ez_rpc_kj_io.hpp
+    ipc/transport/struc/shm/rpc/detail/rpc_fwd.hpp
+    ipc/transport/struc/shm/rpc/detail/server_context_dtl.hpp
+    ipc/transport/struc/shm/rpc/ez_rpc.hpp
+    ipc/transport/struc/shm/rpc/rpc_fwd.hpp
+    ipc/transport/struc/shm/rpc/server_context.hpp
+    ipc/transport/struc/shm/rpc/session_vat_network.hpp
     ipc/transport/struc/shm/serializer.hpp
+    ipc/transport/struc/shm/serializer_stats.hpp
     ipc/transport/struc/shm/shm_fwd.hpp
+    ipc/transport/struc/shm/util.hpp
     ${CAPNP_SCHEMAS}) # Export these like any regular headers...
 
 # ...but also, at the proper time, generate .c++ from them (add to SRCS) and .h also from them (add to HDRS).

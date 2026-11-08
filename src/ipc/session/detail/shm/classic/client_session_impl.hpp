@@ -20,7 +20,6 @@
 
 #include "ipc/session/detail/shm/classic/session_impl.hpp"
 #include "ipc/session/detail/client_session_impl.hpp"
-#include <boost/move/make_unique.hpp>
 
 namespace ipc::session::shm::classic
 {
@@ -40,30 +39,36 @@ namespace ipc::session::shm::classic
  * assigning session_shm() and app_shm() values; and provide the client-specific APIs (notably
  * sync_connect() which is written again in terms of -- our own -- async_connect()).
  *
- * @tparam S_MQ_TYPE_OR_NONE
+ * @tparam MQ_TYPE_OR_NONE
  *         See shm::classic::Client_session counterpart.
- * @tparam S_TRANSMIT_NATIVE_HANDLES
+ * @tparam TRANSMIT_NATIVE_HANDLES
  *         See shm::classic::Client_session counterpart.
  * @tparam Mdt_payload
  *         See shm::classic::Client_session counterpart.
  */
-template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 class Client_session_impl :
-  public Session_impl<session::Client_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload,
-                                                   schema::ShmType::CLASSIC>>
+  public Session_impl<session::Client_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload,
+                                                   session::schema::ShmType::CLASSIC>>
 {
 public:
   // Types.
 
   /// Short-hand for our non-`virtual` base.
   using Base = Session_impl
-                 <session::Client_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload,
-                                               schema::ShmType::CLASSIC>>;
+                 <session::Client_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload,
+                                               session::schema::ShmType::CLASSIC>>;
 
   // Constructors/destructor.
 
   /// Inherit ctor.
   using Base::Base;
+
+  /**
+   * Stops thread W before #Base's members are destroyed.
+   * See ~Server_session_impl() counterpart for the rationale which applies equally here.
+   */
+  ~Client_session_impl();
 
   // Methods.
 
@@ -125,14 +130,6 @@ private:
                      typename Base::Base::Base::Mdt_reader_ptr* mdt_from_srv_or_null,
                      typename Base::Base::Base::Channels* init_channels_by_srv_req,
                      Task_err&& on_done_func);
-
-  // Data.
-
-  /**
-   * Pointee of this is the pointee of Base::app_shm(); null until successful async_connect(); non-null and
-   * immutable subsequently.
-   */
-  typename Base::Arena_ptr m_app_shm;
 }; // class Client_session_impl
 
 // Free functions: in *_fwd.hpp.
@@ -141,10 +138,18 @@ private:
 
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define TEMPLATE_CLSC_CLI_SESSION_IMPL \
-  template<schema::MqType S_MQ_TYPE_OR_NONE, bool S_TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
+  template<session::schema::MqType MQ_TYPE_OR_NONE, bool TRANSMIT_NATIVE_HANDLES, typename Mdt_payload>
 /// Internally used macro; public API users should disregard (same deal as in struc/channel.hpp).
 #define CLASS_CLSC_CLI_SESSION_IMPL \
-  Client_session_impl<S_MQ_TYPE_OR_NONE, S_TRANSMIT_NATIVE_HANDLES, Mdt_payload>
+  Client_session_impl<MQ_TYPE_OR_NONE, TRANSMIT_NATIVE_HANDLES, Mdt_payload>
+
+TEMPLATE_CLSC_CLI_SESSION_IMPL
+CLASS_CLSC_CLI_SESSION_IMPL::~Client_session_impl()
+{
+  // See explanation in ~Server_session_impl().  Same deal here.
+  Base::Base::dtor_async_worker_stop();
+  // Thread W has been joined.
+}
 
 TEMPLATE_CLSC_CLI_SESSION_IMPL
 bool CLASS_CLSC_CLI_SESSION_IMPL::sync_connect(Error_code* err_code)
@@ -178,7 +183,6 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
         typename Base::Base::Base::Channels* init_channels_by_srv_req,
         Task_err&& on_done_func)
 {
-  using boost::movelib::make_unique;
   using boost::make_shared;
   using boost::shared_ptr;
   using Channels = typename Base::Base::Base::Channels;
@@ -189,7 +193,7 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
    * them; so we can simply perform the entire vanilla Base::Base::async_connect(), and if that went fine then
    * open the arenas.
    *
-   * The only wrinkle is, what (unlikely though it is) the opening fails.  *(Base*)this is already in PEER
+   * The only wrinkle is: what if (unlikely though it is) the opening fails?  *(Base*)this is already in PEER
    * state by then.  Well, cancel_peer_state_to_null() exists for that purpose.  A bit cheesy?  One could say that...
    * but it's not that bad.
    *
@@ -231,13 +235,14 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
     const auto cli_app_name = Shared_name::ct(Base::Base::Base::cli_app_ptr()->m_name);
     const auto& srv_namespace = Base::Base::Base::srv_namespace();
 
-    decltype(m_app_shm) session_shm;
+    Arena_ptr session_shm;
+    Arena_ptr app_shm;
     auto shm_pool_name = build_conventional_shared_name(Shared_name::S_RESOURCE_TYPE_ID_SHM,
                                                         srv_app_name, srv_namespace, cli_app_name,
                                                         Base::Base::Base::cli_namespace())
                          / SHM_SUBTYPE_PREFIX
                          / Shared_name::S_1ST_OR_ONLY;
-    session_shm = make_unique<typename Base::Arena>
+    session_shm = make_shared<typename Base::Arena>
                     (get_logger(), shm_pool_name, util::OPEN_ONLY, false, &err_code);
 
     if (!err_code)
@@ -247,23 +252,24 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
                       / SHM_SUBTYPE_PREFIX
                       / Shared_name::S_1ST_OR_ONLY;
 
-      assert(!m_app_shm);
-      m_app_shm = make_unique<typename Base::Arena>
-                    (get_logger(), shm_pool_name, util::OPEN_ONLY, false, &err_code);
+      app_shm = make_shared<typename Base::Arena>
+                  (get_logger(), shm_pool_name, util::OPEN_ONLY, false, &err_code);
     } // if (!err_code) (but may have become truthy inside)
 
     if (err_code)
     {
-      // Get back to NULL state all around.  Note: do *not* ever clean underlying shared resources (server's job!).
-      assert(!m_app_shm);
+      /* Get back to NULL state all around.  Note: do *not* ever clean underlying shared resources (server's job!).
+       * Careful: a failed open-only Pool_arena ctor still yields a (non-null) object in a failed state; so the
+       * locals session_shm and/or app_shm may be non-null here.  They go away on their own; and we never
+       * init_shm_arenas() on failure, so the next connect attempt starts from scratch. */
       Base::Base::cancel_peer_state_to_null();
     }
-    // else { Well... great!  Stay in PEER state. }
-    Base::init_shm_arenas(std::move(session_shm), m_app_shm.get()); // Might be saving nulls (if err_code truthy).
-
-    if (!err_code)
+    else
     {
-      // Still good!  Finalize out-args.
+      // Well... great!  Stay in PEER state.
+      Base::init_shm_arenas(std::move(session_shm), std::move(app_shm));
+
+      // Finalize out-args.
       if (init_channels_by_cli_req_pre_sized)
       {
         *init_channels_by_cli_req_pre_sized = std::move(*temp_init_channels_by_cli_req_pre_sized);
@@ -276,7 +282,7 @@ bool CLASS_CLSC_CLI_SESSION_IMPL::async_connect
       {
         *init_channels_by_srv_req = std::move(*temp_init_channels_by_srv_req);
       }
-    } // if (!err_code)
+    } // else if (!err_code)
 
     on_done_func(err_code); // err_code could be truthy.
   }); // return Base::Base::async_connect()

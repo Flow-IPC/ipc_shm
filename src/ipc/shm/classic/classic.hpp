@@ -25,11 +25,13 @@
 namespace ipc::shm
 {
 
+// Types.
+
 /// Implementation of #Arena_to_borrower_allocator_arena_t for SHM-classic arenas.
 template<>
 struct Arena_to_borrower_allocator_arena<classic::Pool_arena>
 {
-  /// Implementation of `Arena_to_borrower_allocator_arena_t`; for SHM-classic the same `Arena` is used on both sides.
+  /// Implementation of #Arena_to_borrower_allocator_arena_t; for SHM-classic the same `Arena` is used on both sides.
   using Type = classic::Pool_arena;
 };
 
