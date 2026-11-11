@@ -67,7 +67,7 @@ TEST(Sparse_shm_object_test, Commit_semantics)
     Sparse_shm_object obj{bipc::create_only, pool_name.native_str(), bipc::read_write};
     obj.truncate(POOL_SZ);
 
-    bipc::offset_t sz;
+    bipc::offset_t sz = 0;
     ASSERT_TRUE(obj.get_size(sz));
     EXPECT_EQ(size_t(sz), POOL_SZ);
     EXPECT_EQ(shm_pool_committed_sz(pool_name), 0u) << "truncate() must not commit any RAM.";
