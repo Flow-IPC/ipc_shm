@@ -43,7 +43,9 @@ using util::Shared_name;
 using ipc::test::page_sz;
 using ipc::test::shm_pool_committed_sz;
 
-constexpr size_t POOL_SZ = 64 * 1024 * 1024;
+/* Modest, as some tests commit (or fill) all of it, and some environments (e.g., containers) keep the SHM file-system
+ * small. */
+constexpr size_t POOL_SZ = 16 * 1024 * 1024;
 
 // Removes any leftover pool by this name (from, e.g., a previous crashed run); not-found is fine.
 void pre_clean(const Shared_name& pool_name)

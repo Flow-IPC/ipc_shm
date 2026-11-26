@@ -52,7 +52,9 @@ Logger* const g_logger = nullptr; // Normal: Flow-IPC objects silent.
 Logger* const g_logger = &g_logger_obj; // Flip for debugging.
 #endif
 
-constexpr size_t POOL_SZ = 64 * 1024 * 1024;
+/* Modest, as some tests commit (or fill) all of it, and some environments (e.g., containers) keep the SHM file-system
+ * small. */
+constexpr size_t POOL_SZ = 16 * 1024 * 1024;
 
 /* A fresh pool has committed only a few bookkeeping pages: its first page(s) (creation handshake, segment manager,
  * the arena's in-SHM stats) and its last page (the memory-algorithm's end control block).  Allow a little slack. */
